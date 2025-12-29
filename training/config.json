@@ -1,0 +1,8 @@
+{
+    "scratch_dir": "/groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/human_AF_bn_training/test_008",
+    "hfpd_project_home": "/groups/bh6_gp/data/shares/databases/hfpd/genomes/human_AF_AS",
+    "target_elm_classes": "/groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/datasets/target_elm_classes_human_AF.csv",
+    "target_uniprot_ids": "/groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/datasets/target_uniprot_ids_human_AF.csv",
+    "high_confidence_set": "/groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/datasets/HINT_2024_woIsoforms_UniProt_Pairs.csv",
+    "exclusion_set": "/groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/datasets/exclusion_set_2023.csv"
+}

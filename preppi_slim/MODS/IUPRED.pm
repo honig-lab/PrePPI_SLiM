@@ -34,7 +34,7 @@ sub run {
     
     my $s=shift;
 
-    my @dis=`$s->{cmd} $s->{seqfn} long}`;
+    my @dis=`$s->{cmd} $s->{seqfn} long`;
     die "IUPRED Failed" if !@dis; 
     
     my $dis_fn="$s->{seqd}/disorder.fa";

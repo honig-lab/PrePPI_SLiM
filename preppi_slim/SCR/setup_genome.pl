@@ -40,8 +40,8 @@ my $genome=new MODS::Genome(gname => $gname );
 $genome->init($opts{f}) if defined $opts{f};
 
 my $pipeline=new MODS::Pipeline(name=>"Setup",gname=>$gname,debug=>$debug);
+unlink $pipeline->{stepsfn}, "$pipeline->{stepsfn}.focus";
 $pipeline->add_step("IUPRED");
 
 exit(0) if defined $opts{q};
 $pipeline->qsub();
-

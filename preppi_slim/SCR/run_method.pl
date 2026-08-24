@@ -34,7 +34,6 @@ $method->{quiet}='no' if defined $quiet;
 my $adir="$tgtlst.active";
 $method->{active}="$adir/RUN.$gid.$sge_idx";
 `touch $method->{active}; chmod g+rw $method->{active}` if -d "$tgtlst.active";
-`touch $adir/LAST; chmod g+rw $adir/LAST` if defined $ENV{SGE_TASK_LAST} and $taskid==$ENV{SGE_TASK_LAST} and -d "$tgtlst.active";
 my $tm=$pipeline->time();
 chdir $method->{wrkdir} or die "Could not change directory to $method->{wrkdir}";
 my $start=time();
@@ -51,5 +50,4 @@ close TIMFH;
 `chmod g+rw $adir/TM.$gid.$sge_idx`;
 `echo "$tm" > $method->{wrkdir}/done; chmod g+rw $method->{wrkdir}/done`;
 $tm=$pipeline->time();
-
 

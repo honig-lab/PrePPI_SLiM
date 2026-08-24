@@ -1,78 +1,3 @@
-package MODS::Orthologs;
-
-use strict;
-use warnings;
-
-use MODS::Globals;
-use MODS::Method;
-our @ISA=qw(MODS::Method);
-
-sub pname { __PACKAGE__ =~ /MODS::(.+)/; return $1; }
-
-sub ginit {
-
-     my $s=shift;
-     $s->MODS::Method::ginit();
-     $s->{qres}="time=4:00:00";
-     $s->{cmd}="$MAIN_DIRECTORY/SCR/orthologs_search.pl";
-     $s->{output}=$s->{ortho_groups};
-}
-
-
-sub run {
-    my $s=shift;
-    my $genome=$s->{genome};
-    my $home=$genome->home();
-    
-    if(length($s->{gid}) > 6)
-    {
-        print STDERR "Not full protein. Ignore\n";
-        return;
-    }
-    
-    my $uni1=$genome->seqUniId_original($s->{gid});    
-    
-    if(! (-d "$s->{seqd}/Orthology"))
-    {
-	mkdir "$s->{seqd}/Orthology"; 
-    }
-        
-    
-    $s->{pgmopts}=" -p $uni1  > $s->{output}";
-    $s->MODS::Method::run();
-    `chmod g+rw $s->{output}`;
-
-}
-
-sub count_jobs {
-    my $s=shift;
-    return 0 if (length($s->{gid}) > 6);
-    return 1;
-}
-
-
-package MODS::InParanoid;
-use strict;
-use warnings;
-use MODS::Globals;
-our @ISA=qw(MODS::Orthologs);
-
-sub pname { __PACKAGE__ =~ /MODS::(.+)/; return $1; }
-
-sub ginit {
-
-     my $s=shift;
-     $s->MODS::Orthologs::ginit();
-     $s->{cmd}="$MAIN_DIRECTORY/SCR/inparanoid_search.pl";
-     $s->{output}=$s->{inparanoid_groups};
-}
-
-sub count_jobs {
-    my $s=shift;
-    return 0 if (length($s->{gid}) > 6);
-    return 1;
-}
-
 package MODS::Gopher;
 
 use strict;
@@ -80,124 +5,97 @@ use warnings;
 
 use MODS::Globals;
 use MODS::Method;
-#use MODS::PDB;
+our @ISA = qw(MODS::Method);
 
-our @ISA=qw(MODS::Orthologs);
-
-sub pname { __PACKAGE__ =~ /MODS::(.+)/; return $1; }
+sub pname { return 'Gopher'; }
 
 sub ginit {
-
-    my $s=shift;
-    $s->MODS::Method::ginit();
-    $s->{cmd}="/usr/bin/python3 $GOPHER_BIN";
-    $s->{qres}="mem=32G";
-    $s->{output}= $s->{gopher_groups};
-
-    # Set the following to 1 in order to debug the output of the gopher
-    # program. We generally use the value of 0 to conserve file space.
-    $s->{debug}=0;
+    my ($self) = @_;
+    $self->MODS::Method::ginit();
+    $self->{cmd} = "/usr/bin/python3 $GOPHER_BIN";
+    $self->{qres} = 'mem=32G';
+    $self->{output} = $self->{gopher_groups};
+    $self->{output2} = "$self->{seqd}/Orthology/gopher.fas" if defined $self->{seqd};
+    $self->{debug} = 0;
 }
 
 sub run {
-    
-    my $s=shift;
-    die "Domain. Not Orthology computed" if (length($s->{gid})>6);
-    die "Input sequence not defined" if not defined $s->{seqfn}; 
-    die "Input file not $s->{seqfn}" if not -e $s->{seqfn}; 
-    chdir $s->{wrkdir};
-    my $input=$s->{seqfn};
-    my $output="./input.fa";
-    open(INPUT,"<$input") or die("Could not open $input");
-    open(OUTPUT,">$output") or die("Could not open $output");
-    my $header=<INPUT>;
-   
-    my $repID;
-    if($header=~m/RepID=(.*)/)
-    {
-	$repID=$1;
+    my ($self) = @_;
+    die "Domains are not valid Gopher targets" if length($self->{gid}) > 6;
+    die "Input sequence not defined" if not defined $self->{seqfn};
+    die "Input file not found: $self->{seqfn}" if not -e $self->{seqfn};
+
+    chdir $self->{wrkdir} or die "Cannot enter $self->{wrkdir}: $!";
+    open my $input, '<', $self->{seqfn} or die "Cannot open $self->{seqfn}: $!";
+    open my $gopher_input, '>', 'input.fa' or die "Cannot create input.fa: $!";
+    my $header = <$input> // '';
+    my $representative;
+    if ($header =~ /RepID=(.*)/) {
+        $representative = $1;
+    } else {
+        my @items = split /[ |]/, $header;
+        for my $candidate (@items) {
+            if ($candidate =~ /_/) {
+                $representative = $candidate;
+                last;
+            }
+        }
     }
-    else
-    {
-	my @items=split(/[ \|]/,$header);
-	$repID=$items[1];
-	if(!($repID=~m/\_/))
-	{
-	    $repID=$items[2];
-	    if(!($repID=~m/\_/))
-	    {
-		print STDERR "No Species known. Abort\n";
-		return;
-	    }
-	}
+    if (not defined $representative) {
+        close $gopher_input;
+        close $input;
+        warn "No species identifier in FASTA header; skipping $self->{gid}\n";
+        return;
     }
-    
-    my $new_header=">sp|$s->{gid}|$repID\n";
-    print OUTPUT "$new_header";
-    while (<INPUT>)
-    {
-	print OUTPUT $_;
+    chomp $representative;
+
+    print {$gopher_input} ">sp|$self->{gid}|$representative\n";
+    print {$gopher_input} $_ while <$input>;
+    close $gopher_input;
+    close $input;
+
+    $self->{pgmopts} = "orthfas gopher=input.fa orthdb=$GOPHER_DB blastpath=$BLASTCMD";
+    $self->MODS::Method::run();
+
+    my $orthology_dir = "$self->{seqd}/Orthology";
+    my $ortholog_fasta = "ORTH/$self->{gid}.orth.fas";
+    if (not -e $ortholog_fasta) {
+        warn "No orthologs found for $self->{gid}\n";
+        return;
     }
-    close INPUT;
-    close OUTPUT;
-    
-    $s->{pgmopts}=" orthfas gopher=input.fa orthdb=$GOPHER_DB blastpath=$BLASTCMD";
-    $s->MODS::Method::run();
-    
-    if(!-e "ORTH/$s->{gid}.orth.fas")
-    {
-	print STDERR "No Orthologs found\n";
-	return;
+    rename $ortholog_fasta, "$orthology_dir/gopher.fas"
+        or die "Cannot move Gopher FASTA for $self->{gid}: $!";
+
+    my $ortholog_ids = "ORTH/$self->{gid}.orth.id";
+    open my $ids, '<', $ortholog_ids or die "Cannot open $ortholog_ids: $!";
+    my @species;
+    while (my $line = <$ids>) {
+        chomp $line;
+        push @species, $1 if $line =~ /__(.*)/;
     }
-    
-    #this shold be done in Method
-    my $dir="$s->{seqd}/Orthology";
-    if(!-d $dir)
-    {
-	mkdir $dir;
-    }
-    
-    print STDERR `mv ORTH/$s->{gid}.orth.fas $dir/gopher.fas`;
-    
-    open(INPUT2,"<ORTH/$s->{gid}.orth.id") or die("Could not open ORTH/$s->{gid}.orth.id");
-    my $string="";
-    while(<INPUT2>)
-    {
-	my $line=$_;
-	chomp $line;
-	$line=~m/__(.*)/;
-	my $id=$1;
-	$string.="$id|";
-    }
-    close INPUT2;
-   
-    if($string)
-    {
-	open(OUTPUT2,">$s->{output}") or die("Could not open $s->{output}");
-	print OUTPUT2 "gopher\t$string\n";
-	close OUTPUT2;
-        `chmod g+rw $s->{output}`;
+    close $ids;
+
+    if (@species) {
+        open my $output, '>', $self->{output} or die "Cannot open $self->{output}: $!";
+        print {$output} 'gopher', "\t", join('|', @species), "|\n";
+        close $output;
+        chmod 0664, $self->{output};
     }
 
-    # The output of the gopher program will be produced if $s->{debug} is any
-    # value other than 0. It will be located in $s->{wrkdir}, which is in the
-    # "scratch" dir of shares/hfpd/PrePPI/{genome}/Pipeline_{id}/Gopher
-    if($s->{debug} == 0)
-    {
-        print STDERR `rm $s->{wrkdir}/*.*`;
-        print STDERR `rm -rf ORTH`;
-        print STDERR `rm -rf PARA`;
-        print STDERR `rm -rf BLAST`;
+    if ($self->{debug} == 0) {
+        unlink glob "$self->{wrkdir}/*.*";
+        system('rm', '-rf', 'ORTH', 'PARA', 'BLAST');
     }
-    
 }
-    
+
 sub count_jobs {
-    my $s=shift;
-    return 0 if (length($s->{gid}) > 6);
-    return 1;
+    my ($self) = @_;
+    return length($self->{gid}) > 6 ? 0 : 1;
+}
+
+sub complete {
+    my ($self) = @_;
+    return -e $self->{output} && -e $self->{output2};
 }
 
 1;
-        
-

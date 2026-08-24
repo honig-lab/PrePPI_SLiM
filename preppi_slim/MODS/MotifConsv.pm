@@ -13,9 +13,11 @@ sub ginit {
      $s->MODS::Method::ginit();
      $s->{cmd}="$MAIN_DIRECTORY/SCR/get_motif_consv.pl";
      $s->{holds}="MuscleG,FindMotifs_ELM";
+     return $s if not defined $s->{seqd};
      $s->{output}="$s->{seqd}/Motifs/motif_elm.csv";
      $s->{input}="$s->{seqd}/Aligns/Gopher.csv";
      $s->{input2}="$s->{seqd}/Motifs/motif_elm.txt";
+     return $s;
 }
 
 sub run {
@@ -24,7 +26,7 @@ sub run {
     
     return if ( ($s->{gid} =~ m/\.e/) ||  ($s->{gid} =~ m/\.d/) || ($s->{gid} =~ m/\.g/)  );
     
-    if(-e $s->{input} && $s->{input2}) {
+    if(-e $s->{input} && -e $s->{input2}) {
         my $aux_out=$s->{wrkdir}."/output.txt";
         
         open MOTIFS, "<", $s->{input2} or die "Cannot open file $s->{input2} to read from!\n";
@@ -56,4 +58,3 @@ sub count_jobs {
 
 1;
         
-

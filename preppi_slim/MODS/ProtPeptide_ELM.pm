@@ -14,18 +14,18 @@ sub ginit {
      my $s=shift;
      $s->MODS::Method::ginit();
      $s->{holds}="FindPRDs_ELM,FindMotifs_ELM,MotifConsv,IUPRED";
+     $s->{qres}="time=12:00:00";
+     $s->{output_fn}="ProtPeptide_ELM.txt";
+     return $s if not defined $s->{seqd} or not defined $s->{gname};
      $s->{disorder}="$s->{seqd}/disorder.fa";
      $s->{motif}="$s->{seqd}/Motifs/motif_elm.txt";
      $s->{csv}="$s->{seqd}/Motifs/motif_elm.csv";
      
-     $s->{qres}="time=12:00:00";
-     $s->{output_fn}="ProtPeptide_ELM.txt";
      $s->{output}=$s->{seqd}."/Motifs/$s->{output_fn}.tar.gz";
      $s->{genome2}=$s->{genome}; # Default: genome2 = genome1
      # Mentioning the full path because $s->{pipedir} is not working.
      # ProtPeptide_ELM is the name of the pipeline as per run_PrP_ELM_batches.pl
      my $g2_file = "$GENOME_DIRECTORY/$s->{gname}/Pipeline/ProtPeptide_ELM.pip/ProtPeptide_ELM.g2";
-     print STDERR "Debug: Checking for .g2 file at $g2_file\n";
 
      if (-e $g2_file) {
          open(G2, "<", $g2_file) or die "Cannot open $g2_file to read genome2\n";
@@ -34,7 +34,6 @@ sub ginit {
          close G2;
 
          if ($external_genome ne "") {
-             print STDERR "Debug: Found external genome from .g2 file: $external_genome\n";
              if (!-d "$GENOME_DIRECTORY/$external_genome") {
                  print STDERR "Error: Genome $external_genome does not exist\n";
                  return 0;
@@ -42,9 +41,8 @@ sub ginit {
              $s->{genome2} = new MODS::Genome(gname => $external_genome);
              $s->{output} = "$s->{seqd}/Motifs/$external_genome\_$s->{output_fn}.tar.gz";
          }
-     } else {
-         print STDERR "Debug: No .g2 file found, using default genome.\n";
      }
+     return $s;
 }
 
 sub run {
@@ -76,7 +74,14 @@ sub run {
         }
         close MTF;
         	
-        return if ($cont_motif==0);
+        if ($cont_motif==0) {
+            my $aux_out=$s->{wrkdir}."/$s->{output_fn}";
+            open OUT, ">", $aux_out or die "Cannot create empty result $aux_out!\n";
+            close OUT;
+            system('tar', '-C', $s->{wrkdir}, '-zcf', $s->{output}, $s->{output_fn}) == 0
+                or die "Cannot archive empty protein-peptide result for $s->{gid}\n";
+            return;
+        }
         if(-e $s->{csv})
         {
             open CSV, "<", $s->{csv} or die "Cannot open file $s->{csv} to read from!\n";

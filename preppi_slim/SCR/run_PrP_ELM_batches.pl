@@ -39,9 +39,9 @@ if(defined $opts{g}) {
 my $genome=new MODS::Genome(gname => $gname );
 
 my $pipeline=new MODS::Pipeline(name=>"ProtPeptide_ELM",gname=>$gname,debug=>$debug);
+unlink $pipeline->{stepsfn}, "$pipeline->{stepsfn}.focus";
 # $pipeline->set_targets($opts{t}) if defined $opts{t};
 
 $pipeline->add_step("ProtPeptide_ELM",$parms);
 
 $pipeline->qsub();
-

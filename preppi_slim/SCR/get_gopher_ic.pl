@@ -48,9 +48,14 @@ while (<IFH>) {
 }
 close IFH;
 
-# run muscle to align orthologs
-my $muscle_align_ofile = "$seq_id.gopher.muscle";
-system "$muscle_cmd -in $gopher_fa -out $muscle_align_ofile -maxmb 1000";
+# Run MUSCLE in the method working area.  $seq_id is an absolute path to the
+# genome FASTA, so deriving the temporary filename from it incorrectly placed
+# the alignment in the shared fasta directory instead of this job's workspace.
+my $muscle_align_ofile = "$output.gopher.muscle";
+system($muscle_cmd, '-in', $gopher_fa, '-out', $muscle_align_ofile, '-maxmb', '1000') == 0
+    or die "MUSCLE failed for $seq_id (exit status ".($? >> 8).")\n";
+-s $muscle_align_ofile
+    or die "MUSCLE did not create a non-empty alignment: $muscle_align_ofile\n";
 
 # read muscle alignment file, push all alignments into an array
 # the alignment string will have gaps in them
@@ -182,6 +187,7 @@ for (my $i = 0; $i <= $#positions; $i++)
     print OFH "$index $aa $ic\n";
 } 
 close OFH;                
-
+unlink $muscle_align_ofile
+    or warn "Cannot remove temporary MUSCLE alignment $muscle_align_ofile: $!\n";
 
 

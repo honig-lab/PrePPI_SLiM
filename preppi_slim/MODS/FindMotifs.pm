@@ -1,34 +1,3 @@
-package MODS::FindMotifs;
-
-use strict;
-use warnings;
-
-use MODS::Globals;
-use MODS::Method;
-our @ISA=qw(MODS::Method);
-
-sub pname { __PACKAGE__ =~ /MODS::(.+)/; return $1; }
-
-sub ginit {
-
-     my $s=shift;
-     $s->MODS::Method::ginit();
-     $s->{cmd}="$MAIN_DIRECTORY/SCR/get_motifs.pl";
-     $s->{output}=$s->{motifs};
-}
-
-sub run {
-    my $s=shift;
-    $s->{pgmopts}="    $s->{seqfn} $s->{output} ";
-    $s->MODS::Method::run();
-}
-
-sub count_jobs {
-    my $s=shift;
-    return 0 if length($s->{gid})>6;
-    return 1;
-}
-
 package MODS::FindMotifs_ELM;
 
 use strict;
@@ -36,20 +5,26 @@ use warnings;
 
 use MODS::Globals;
 use MODS::Method;
-our @ISA=qw(MODS::FindMotifs);
+our @ISA = qw(MODS::Method);
 
-sub pname { __PACKAGE__ =~ /MODS::(.+)/; return $1; }
+sub pname { return 'FindMotifs_ELM'; }
 
 sub ginit {
-
-     my $s=shift;
-     $s->MODS::FindMotifs::ginit();
-     $s->{cmd}="$MAIN_DIRECTORY/SCR/get_motifs_elm.pl";
-     $s->{output}=$s->{motifs_elm};
-     
+    my ($self) = @_;
+    $self->MODS::Method::ginit();
+    $self->{cmd} = "$MAIN_DIRECTORY/SCR/get_motifs_elm.pl";
+    $self->{output} = $self->{motifs_elm};
 }
 
+sub run {
+    my ($self) = @_;
+    $self->{pgmopts} = "$self->{seqfn} $self->{output}";
+    return $self->MODS::Method::run();
+}
+
+sub count_jobs {
+    my ($self) = @_;
+    return length($self->{gid}) > 6 ? 0 : 1;
+}
 
 1;
-        
-

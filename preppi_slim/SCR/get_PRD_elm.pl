@@ -38,9 +38,11 @@ if (-e $dfile)
     system "rm $dfile";
 }
 
-my $cmd = "$pfam_perl -w $pfam_scan -fasta $fa -dir $hmm_dir -outfile $dfile";
-print STDERR "$cmd\n";
-print STDERR  `$cmd`;
+my @cmd = ($pfam_perl, '-w', $pfam_scan, '-fasta', $fa, '-dir', $hmm_dir, '-outfile', $dfile);
+print STDERR join(' ', @cmd), "\n";
+system(@cmd) == 0
+    or die "PfamScan failed for $fa (exit status ".($? >> 8).")\n";
+-e $dfile or die "PfamScan did not create its output: $dfile\n";
 
 my %seq_domains = read_domains($dfile,\%elm_domains);
 open OFH, ">", $ofile or die "Cannot open $ofile to write into!\n";

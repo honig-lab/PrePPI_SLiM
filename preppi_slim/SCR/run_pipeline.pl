@@ -22,6 +22,8 @@ my $debug='no';
 $debug='yes' if $opts{d};
 
 my $pipeline=new MODS::Pipeline(name=>$pname,gname=>$gname,debug=>$debug);
+chdir $pipeline->{pipedir}
+    or die "Could not change directory to $pipeline->{pipedir}: $!\n";
 my @steps=$pipeline->steps();
 my $genome=new MODS::Genome(gname=>$gname);
 
@@ -146,9 +148,6 @@ while(1) {
     foreach my $k (keys %jobstat) { print CPL "$k\t$jobstat{$k}\n"; }
     close CPL;
 
-    #my @rcstat=`qstat -j collect_rc.$gname |& grep name`;
-    #print STDERR `qsub collect_rc.sh` if not scalar @rcstat;
-
     if(-e "$pname.update") { `cp $pname.jstat $pname.jstat.tmp; rm $pname.update`; }
     if(-e "$pname.kill") { $pipeline->stage("Pipeline was killed"); `rm -rf $pname.kill`; exit(0); }
     if(-e "$pname.pause") { `touch $pname.paused`; while(-e "$pname.pause") { sleep(1); } }
@@ -173,7 +172,7 @@ while(1) {
         my ($jname,$j)=split;
         my $js=substr($jname,0,length($jname)-10);
         next if not -e "$jname";
-        my @jobdat=`squeue --job=$jname --noheader --format="%.j" 2> /dev/null`;
+        my @jobdat=`squeue --job=$j --noheader --format="%.j" 2> /dev/null`;
         next if not @jobdat;
         push(@running,$_);
         $nstep{$js}++ if not -e "$jname.active/LAST";
@@ -201,8 +200,13 @@ while(1) {
     print STDERR "Remaining jobs: $activej\n";
 
     if(not scalar(@jlist)) {
-        $pipeline->stage("Pipeline complete.");
         `cp $pname.jstat $pname.jstat.tmp`;
+        my @failed=grep { $jobstat{$_}=~/fail/ } keys %jobstat;
+        if(@failed) {
+            $pipeline->stage("Pipeline failed: ".scalar(@failed)." job(s) failed.");
+            exit(1);
+        }
+        $pipeline->stage("Pipeline complete.");
         $pipeline->mail(); 
         exit(0);
     }
@@ -216,5 +220,6 @@ while(1) {
         `echo $lasttgt > $pname.tlast`;
         exit(0); 
     } 
+    sleep(1);
 }
    

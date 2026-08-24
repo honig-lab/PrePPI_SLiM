@@ -19,7 +19,7 @@ sub new {
 
     $s->{genome}=new MODS::Genome(gname => $s->{gname});
     die "Genome $s->{gname} does not exist." if not -d $s->{genome}->home();
-    $s->{pipedir}="/groups/bh6_gp/data/shares/databases/hfpd/genomes/$s->{gname}/Pipeline/$s->{name}.pip";
+    $s->{pipedir}="$GENOME_DIRECTORY/$s->{gname}/Pipeline/$s->{name}.pip";
     `mkdir -m 775 $s->{pipedir}` if not -d $s->{pipedir};
     `mkdir -m 775 $s->{pipedir}/timings` if not -d "$s->{pipedir}/timings";
     `mkdir -m 775 $s->{pipedir}/completed` if not -d "$s->{pipedir}/completed";
@@ -86,19 +86,22 @@ sub qsub {
     print QSUB "#SBATCH --time=24:00:00\n";
     print QSUB "#SBATCH --output=$fn.o\%j\n";
     print QSUB "#SBATCH --error=$fn.e\%j\n";
+    print QSUB "set -e\n";
     my $dbopt="";
     $dbopt=" -d " if $s->{debug} eq 'yes';
     print QSUB "export PERL5LIB=$ENV{PERL5LIB}\n";
-    print QSUB "export TROLLTOP=$ENV{TROLLTOP}\n";
-    print QSUB "export SUBMAT=$ENV{SUBMAT}\n";
-    print QSUB "export JACKALDIR=$ENV{JACKALDIR}\n";
     print QSUB "export HFPD_DIR=$ENV{HFPD_DIR}\n";
     print QSUB "export HFPD_DATA_DIR=$ENV{HFPD_DATA_DIR}\n" if defined $ENV{HFPD_DATA_DIR};
     print QSUB "export HFPD_IFS_DATA=$ENV{HFPD_IFS_DATA}\n" if defined $ENV{HFPD_IFS_DATA};
     print QSUB "export HFPD_IFS_HOME=$ENV{HFPD_IFS_HOME}\n" if defined $ENV{HFPD_IFS_HOME};
     print QSUB "export HFPD_IFS_SCRATCH=$ENV{HFPD_IFS_SCRATCH}\n" if defined $ENV{HFPD_IFS_SCRATCH};
     print QSUB "export HFPD_SCRATCH_DIR=$ENV{HFPD_SCRATCH_DIR}\n" if defined $ENV{HFPD_SCRATCH_DIR};
-    print QSUB "$MAIN_DIRECTORY/SCR/run_pipeline.pl $s->{name} $s->{gname} $dbopt\n";
+    print QSUB "if ! $MAIN_DIRECTORY/SCR/run_pipeline.pl $s->{name} $s->{gname} $dbopt; then\n";
+    print QSUB "    if ! grep -q '^Pipeline failed:' $s->{pipedir}/$s->{name}.stage 2>/dev/null; then\n";
+    print QSUB "        echo 'Pipeline controller failed. Inspect the SLURM error log.' > $s->{pipedir}/$s->{name}.stage\n";
+    print QSUB "    fi\n";
+    print QSUB "    exit 1\n";
+    print QSUB "fi\n";
     print QSUB "\n";
     close QSUB;
     `chmod g+rw $qsub`;
@@ -362,9 +365,17 @@ sub qsub_block {
     close QSUB;
 
     `chmod g+rw $s->{pipedir}/w$fn.sh`;
-    print STDERR `sbatch $s->{pipedir}/w$fn.sh` if $s->{qflag} eq 'yes';
+    my $wait_return = `sbatch $s->{pipedir}/w$fn.sh`;
+    print STDERR $wait_return if $s->{qflag} eq 'yes';
+    if ($wait_return !~ /^Submitted batch job (\d+)/) {
+        die "Waiter job submission failed: $wait_return";
+    }
+    my $wait_job_id = $1;
 
-    return "$fn\t$jtot";
+    # The controller needs the Slurm job ID here.  Returning the target count
+    # caused it to query squeue with the target filename/target count and lose
+    # track of the still-running waiter.
+    return "$fn\t$wait_job_id";
 }
 
 sub debug_step {
@@ -403,7 +414,6 @@ sub status {
     $$jsref{$jid}.="(last checked: $tm)" unless $$jsref{$jid}=~/last checked/;
     $$jsref{$jid}=~ s/last checked .+:\d+:\d+:\d+\)/last checked $tm\)/;
     my $method=$mname->new(gname=>$s->{gname},gid=>$gid,step_parameters=>$s->step_arg($sname));
-    $$jsref{$jid}.="($tm modeled)" if -e $method->{pdb} and not $$jsref{$jid}=~/modeled/;
     do { $$jsref{$jid}.="($tm complete)" unless $$jsref{$jid}=~/complete/; return; } if $method->complete();
     if($$jsref{$jid}=~/submit/ and not -e "$method->{wrkdir}/done" and not $$jsref{$jid}=~/killed/ and not $$jsref{$jid}=~/fail|complete/) { 
         $$jsref{$jid}=~/submit (.+.tgt)\)/;
@@ -447,7 +457,7 @@ sub stage {
     my $jid=$s->get_jid();
     $msg=`cat $s->{pipedir}/$s->{name}.stage` if -e "$s->{pipedir}/$s->{name}.stage";
     return $msg if $msg=~/Pipeline complete/;
-    return "Pipeline not running, last msg: $msg" if not defined $jid and $msg=~/[a-z]/;
+    return "Pipeline not running, last msg: $msg" if !defined($jid) && $msg=~/[a-z]/;
     return "$msg";
 }
 
@@ -608,4 +618,3 @@ sub time {
 }
 
 1;
-

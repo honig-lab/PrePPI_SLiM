@@ -21,7 +21,10 @@ my $dbg=shift;
 my $genome=new MODS::Genome(gname=>$gname);
 my $pipeline=new MODS::Pipeline(name=>$pname,gname=>$gname);
 
-sleep(300);
+# This job is submitted with an afterok dependency on the method array, so all
+# array tasks have already finished successfully when processing starts.  The
+# former five-minute sleep only delayed pipeline completion and left the stage
+# marker stale for small runs.
 my @ids=`cut -f 1 $tgts`;
 foreach(@ids) {
     print STDERR $_;

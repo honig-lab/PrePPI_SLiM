@@ -34,9 +34,7 @@ my $genome=new MODS::Genome(gname => $gname );
 
 my $pipeline=new MODS::Pipeline(name=>"run_elm",gname=>$gname,debug=>$debug);
 $pipeline->set_targets($opts{t}) if defined $opts{t};
-
-# Disorder
-$pipeline->add_step("IUPRED");
+unlink $pipeline->{stepsfn}, "$pipeline->{stepsfn}.focus";
 
 # ELM protein peptide
 $pipeline->add_step("FindMotifs_ELM");
@@ -46,4 +44,3 @@ $pipeline->add_step("MuscleG");
 $pipeline->add_step("MotifConsv");
 
 $pipeline->qsub();
-

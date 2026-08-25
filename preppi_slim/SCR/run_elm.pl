@@ -44,6 +44,5 @@ $pipeline->add_step("FindPRDs_ELM");
 $pipeline->add_step("Gopher");
 $pipeline->add_step("MuscleG");
 $pipeline->add_step("MotifConsv");
-$pipeline->add_step("ProtPeptide_ELM");
 
 $pipeline->qsub($execute);

@@ -77,6 +77,9 @@ sub run {
 
     if (@species) {
         open my $output, '>', $self->{output} or die "Cannot open $self->{output}: $!";
+        print {$output} "# record_type=ortholog_species\n";
+        print {$output} "# genome=$self->{gname}\tprotein=$self->{gid}\n";
+        print {$output} "# method\tspecies_identifiers\n";
         print {$output} 'gopher', "\t", join('|', @species), "|\n";
         close $output;
         chmod 0664, $self->{output};

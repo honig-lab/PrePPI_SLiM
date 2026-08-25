@@ -4,6 +4,8 @@ use MODS::Globals;
 my $fa = shift;
 my $dfile = shift;
 my $ofile = shift;
+my $genome = shift // 'unknown';
+my $protein = shift // 'unknown';
 
 my $elm_file = $ELM_CLASSES;
 
@@ -44,8 +46,23 @@ system(@cmd) == 0
     or die "PfamScan failed for $fa (exit status ".($? >> 8).")\n";
 -e $dfile or die "PfamScan did not create its output: $dfile\n";
 
+my $pfam_with_metadata = "$dfile.metadata.$$";
+open my $pfam_in, '<', $dfile or die "Cannot read $dfile: $!\n";
+open my $pfam_out, '>', $pfam_with_metadata
+    or die "Cannot create $pfam_with_metadata: $!\n";
+print {$pfam_out} "# record_type=PfamScan_domains\n";
+print {$pfam_out} "# genome=$genome\tprotein=$protein\n";
+print {$pfam_out} $_ while <$pfam_in>;
+close $pfam_in;
+close $pfam_out;
+rename $pfam_with_metadata, $dfile
+    or die "Cannot replace $dfile with metadata-annotated output: $!\n";
+
 my %seq_domains = read_domains($dfile,\%elm_domains);
 open OFH, ">", $ofile or die "Cannot open $ofile to write into!\n";
+print OFH "# record_type=ELM_peptide_recognition_domains\n";
+print OFH "# genome=$genome\tprotein=$protein\n";
+print OFH "# ELM_class\tPfam_domain\tPRD_start\tPRD_end\n";
 foreach my $dname (sort keys %seq_domains)
 {
     my @classes = sort keys %{$elm_domains{$dname}};

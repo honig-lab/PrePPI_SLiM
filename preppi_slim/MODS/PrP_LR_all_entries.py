@@ -122,12 +122,16 @@ def process_tar_file(args):
     try:
         with tarfile.open(tar_path, "r:gz") as tar:
             for member in tar.getmembers():
-                if member.name.endswith("ProtPeptide_ELM.txt"):
+                if (member.name.endswith("ProtPeptide_ELM.txt") and
+                        not os.path.basename(member.name).startswith("._")):
                     fileobj = tar.extractfile(member)
                     if fileobj is None:
                         continue
                     try:
-                        df = pd.read_csv(fileobj, header=None, sep='\t', dtype=str)
+                        df = pd.read_csv(fileobj, header=None, sep='\t', dtype=str,
+                                         comment='#')
+                    except pd.errors.EmptyDataError:
+                        continue
                     except Exception as e:
                         log_messages.append(f"Error reading {member.name} from {tar_path}: {e}\n")
                         continue
@@ -155,6 +159,10 @@ def process_tar_file(args):
     output_file = os.path.join(out_dir, output_filename)
     try:
         with open(output_file, 'w') as out_f:
+            out_f.write("# record_type=PrePPI-SLiM_likelihood_ratios_all_entries\n")
+            out_f.write(f"# source_genome_folder={os.path.basename(batch)}"
+                        f"\tquery_protein={hfpd_id}\n")
+            out_f.write("# motif_protein\tprd_protein\tlikelihood_ratio\tELM_class\n")
             for pp in sorted(lrs.keys()):
                 sorted_entries = sorted(lrs[pp], key=lambda x: x[0], reverse=True)
                 for lr_val, elm_class in sorted_entries:

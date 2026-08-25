@@ -18,7 +18,7 @@ sub ginit {
 
 sub run {
     my ($self) = @_;
-    $self->{pgmopts} = "$self->{seqfn} $self->{output}";
+    $self->{pgmopts} = "$self->{seqfn} $self->{output} $self->{gname} $self->{gid}";
     return $self->MODS::Method::run();
 }
 

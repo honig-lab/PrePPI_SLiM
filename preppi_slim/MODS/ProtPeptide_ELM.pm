@@ -3,173 +3,186 @@ package MODS::ProtPeptide_ELM;
 use strict;
 use warnings;
 
+use File::Path qw(make_path);
 use MODS::Globals;
 use MODS::Method;
-our @ISA=qw(MODS::Method);
+our @ISA = qw(MODS::Method);
 
-sub pname { __PACKAGE__ =~ /MODS::(.+)/; return $1; }
+sub pname { return 'ProtPeptide_ELM'; }
 
 sub ginit {
+    my ($self) = @_;
+    $self->MODS::Method::ginit();
+    $self->{qres} = 'time=12:00:00';
+    $self->{output_fn} = 'ProtPeptide_ELM.txt';
+    $self->{orientation} //= 'motif';
+    return $self if not defined $self->{seqd} or not defined $self->{gname};
 
-     my $s=shift;
-     $s->MODS::Method::ginit();
-     $s->{holds}="FindPRDs_ELM,FindMotifs_ELM,MotifConsv,IUPRED";
-     $s->{qres}="time=12:00:00";
-     $s->{output_fn}="ProtPeptide_ELM.txt";
-     return $s if not defined $s->{seqd} or not defined $s->{gname};
-     $s->{disorder}="$s->{seqd}/disorder.fa";
-     $s->{motif}="$s->{seqd}/Motifs/motif_elm.txt";
-     $s->{csv}="$s->{seqd}/Motifs/motif_elm.csv";
-     
-     $s->{output}=$s->{seqd}."/Motifs/$s->{output_fn}.tar.gz";
-     $s->{genome2}=$s->{genome}; # Default: genome2 = genome1
-     # Mentioning the full path because $s->{pipedir} is not working.
-     # ProtPeptide_ELM is the name of the pipeline as per run_PrP_ELM_batches.pl
-     my $g2_file = "$GENOME_DIRECTORY/$s->{gname}/Pipeline/ProtPeptide_ELM.pip/ProtPeptide_ELM.g2";
+    $self->{partner_gname} = $self->{external} // $self->{gname};
+    $self->{genome2} = MODS::Genome->new(gname => $self->{partner_gname});
+    die "Partner genome does not exist: $self->{genome2}->{home}\n"
+        if not -d $self->{genome2}->{home};
 
-     if (-e $g2_file) {
-         open(G2, "<", $g2_file) or die "Cannot open $g2_file to read genome2\n";
-         my $external_genome = <G2>;
-         chomp $external_genome;
-         close G2;
+    $self->{run_tag} //= "$self->{orientation}_$self->{partner_gname}";
+    $self->{run_tag} =~ s/[^A-Za-z0-9_.-]+/_/g;
+    $self->{wrkdir} = "$self->{genome}->{home}/Pipeline/Pipeline_$self->{gid}/ProtPeptide_ELM/$self->{run_tag}";
+    make_path($self->{wrkdir}, { mode => 0775 }) if not -d $self->{wrkdir};
 
-         if ($external_genome ne "") {
-             if (!-d "$GENOME_DIRECTORY/$external_genome") {
-                 print STDERR "Error: Genome $external_genome does not exist\n";
-                 return 0;
-             }
-             $s->{genome2} = new MODS::Genome(gname => $external_genome);
-             $s->{output} = "$s->{seqd}/Motifs/$external_genome\_$s->{output_fn}.tar.gz";
-         }
-     }
-     return $s;
+    my ($motif_gname, $prd_gname) = $self->{orientation} eq 'motif'
+        ? ($self->{gname}, $self->{partner_gname})
+        : ($self->{partner_gname}, $self->{gname});
+    my $archive_name =
+        "${motif_gname}_slim_${prd_gname}_prd_ProtPeptide_ELM.txt.tar.gz";
+    $archive_name =~ s/[^A-Za-z0-9_.-]+/_/g;
+    $self->{output} = "$self->{seqd}/Motifs/$archive_name";
+    return $self;
 }
 
 sub run {
-    my $s=shift;
-    
-    #check PRDs which over the cutoffs
-    if(-e $s->{motif})
-    {
-        
-        my %motif=();
-        my %motif_class=();
-        my %motif_init=();
-        my %motif_end=();
-        my %motif_csv=();
-        my $cont_motif=0;
-        open MTF, "<", $s->{motif} or die "Cannot open file $s->{motif} to read from!\n";
-        while(<MTF>)
-        {
-            my $line=$_;
-            chomp $line;
-            my ($class,$peptide,$init,$end)=split(' ',$line);
-            my $label=$peptide."_".$class."_".$init;
-            $motif{$label}=$peptide;
-            $motif_class{$label}=$class;
-            $motif_init{$label}=$init;
-            $motif_end{$label}=$end;
-            $motif_csv{$label}=0;
-            $cont_motif++;
+    my ($self) = @_;
+    die "Unknown orientation: $self->{orientation}\n"
+        if $self->{orientation} ne 'motif' and $self->{orientation} ne 'prd';
+
+    my ($motif_genome, $prd_genome, @rows);
+    if ($self->{orientation} eq 'motif') {
+        $motif_genome = $self->{genome};
+        $prd_genome = $self->{genome2};
+        my @motifs = $self->_motifs($motif_genome, $self->{gid});
+        for my $prd_id ($prd_genome->get_target_list()) {
+            my @prds = $self->_prds($prd_genome, $prd_id);
+            push @rows, $self->_matching_rows($self->{gid}, \@motifs, $prd_id, \@prds);
         }
-        close MTF;
-        	
-        if ($cont_motif==0) {
-            my $aux_out=$s->{wrkdir}."/$s->{output_fn}";
-            open OUT, ">", $aux_out or die "Cannot create empty result $aux_out!\n";
-            close OUT;
-            system('tar', '-C', $s->{wrkdir}, '-zcf', $s->{output}, $s->{output_fn}) == 0
-                or die "Cannot archive empty protein-peptide result for $s->{gid}\n";
-            return;
+    } else {
+        $motif_genome = $self->{genome2};
+        $prd_genome = $self->{genome};
+        my @prds = $self->_prds($prd_genome, $self->{gid});
+        for my $motif_id ($motif_genome->get_target_list()) {
+            my @motifs = $self->_motifs($motif_genome, $motif_id);
+            push @rows, $self->_matching_rows($motif_id, \@motifs, $self->{gid}, \@prds);
         }
-        if(-e $s->{csv})
-        {
-            open CSV, "<", $s->{csv} or die "Cannot open file $s->{csv} to read from!\n";
-            while(<CSV>)
-            {
-                my $line=$_;
-                chomp $line;
-                my ($class,$peptide,$init)=split(' ',$line);
-                my $label=$peptide."_".$class."_".$init;
-                $motif_csv{$label}=1 if(defined $motif_csv{$label});
-            }
-            close CSV; 
-        }
-        
-        my %pos=read_disorder($s->{disorder});
-        my %motif_dis=();
-        foreach my $key (sort keys %motif)
-        {
-            my $cont=0;
-            for(my $i=$motif_init{$key};$i<=$motif_end{$key};$i++)
-            {
-                $cont+=$pos{$i};
-            }
-            my $final=$cont/($motif_end{$key}-$motif_init{$key}+1);
-            $motif_dis{$key}=$final;
-        }
-        my $aux_out=$s->{wrkdir}."/$s->{output_fn}";
-        open OUT, ">", $aux_out or die "Cannot open file $aux_out to read from!\n";
-            my @targets=$s->{genome2}->get_target_list(); 
-            foreach my $target (@targets)
-            {    
-                my $motifF="$s->{genome2}->{home}/Seqs/$target/Motifs/prd_elm.txt";     
-                if(-e $motifF)
-                {
-                    open MOTIF, "<", $motifF or die "Cannot open file $motifF to read from!\n";
-                    while(<MOTIF>)
-                    {
-                        my $line=$_;
-                        chomp $line;
-                        my ($class,$type,$init,$end)=split(' ',$line);
-                        foreach my $key (sort keys %motif)
-                        {
-                            next if(!($class eq $motif_class{$key}));
-                            print OUT "$s->{gid}\t$target\t$class\t$init\t$end\t$motif{$key}\t$motif_init{$key}\t$motif_end{$key}\t$motif_csv{$key}\t$motif_dis{$key}\n";
-                        }
-                    }
-                    close MOTIF;
-                }
-            }
-        close OUT;
-        print STDERR `sort -o $aux_out $aux_out`;
-        print STDERR `cd $s->{wrkdir} && tar -zcf $s->{output} $s->{output_fn}`;
     }
-    
-    
+
+    my $raw_file = "$self->{wrkdir}/$self->{output_fn}";
+    open my $out, '>', $raw_file or die "Cannot create $raw_file: $!\n";
+    print {$out} "# record_type=PrePPI-SLiM_PRD-SLiM_candidates\n";
+    print {$out} "# motif_genome=$motif_genome->{gname}\n";
+    print {$out} "# prd_genome=$prd_genome->{gname}\n";
+    print {$out} "# anchor_genome=$self->{gname}\tanchor_protein=$self->{gid}\tanchor_role=$self->{orientation}\n";
+    print {$out} "# motif_protein\tprd_protein\tELM_class\tprd_start\tprd_end\tmotif_sequence\tmotif_start\tmotif_end\tconserved\tdisordered_fraction\n";
+    print {$out} "$_\n" for sort @rows;
+    close $out;
+
+    local $ENV{COPYFILE_DISABLE} = 1;
+    system('tar', '-C', $self->{wrkdir}, '-zcf', $self->{output}, $self->{output_fn}) == 0
+        or die "Cannot archive $raw_file to $self->{output}\n";
+    unlink $raw_file or warn "Cannot remove temporary result $raw_file: $!\n";
+}
+
+sub _matching_rows {
+    my ($self, $motif_id, $motifs, $prd_id, $prds) = @_;
+    my @rows;
+    for my $motif (@{$motifs}) {
+        for my $prd (@{$prds}) {
+            next if $motif->{class} ne $prd->{class};
+            push @rows, join "\t",
+                $motif_id,
+                $prd_id,
+                $motif->{class},
+                $prd->{start},
+                $prd->{end},
+                $motif->{sequence},
+                $motif->{start},
+                $motif->{end},
+                $motif->{conserved},
+                $motif->{disordered_fraction};
+        }
+    }
+    return @rows;
+}
+
+sub _motifs {
+    my ($self, $genome, $id) = @_;
+    my $motif_file = "$genome->{home}/Seqs/$id/Motifs/motif_elm.txt";
+    return () if not -e $motif_file;
+
+    my %conserved;
+    my $conservation_file = "$genome->{home}/Seqs/$id/Motifs/motif_elm.csv";
+    if (-e $conservation_file) {
+        open my $csv, '<', $conservation_file or die "Cannot read $conservation_file: $!\n";
+        while (my $line = <$csv>) {
+            next if $line =~ /^#/ or $line =~ /^\s*$/;
+            chomp $line;
+            my ($class, $sequence, $start) = split /\s+/, $line;
+            $conserved{join "\t", $class, $sequence, $start} = 1;
+        }
+        close $csv;
+    }
+
+    my %disorder = $self->_read_disorder("$genome->{home}/Seqs/$id/disorder.fa");
+    open my $motifs, '<', $motif_file or die "Cannot read $motif_file: $!\n";
+    my @records;
+    while (my $line = <$motifs>) {
+        next if $line =~ /^#/ or $line =~ /^\s*$/;
+        chomp $line;
+        my ($class, $sequence, $start, $end) = split /\s+/, $line;
+        next if not defined $end;
+        my $disordered = 0;
+        $disordered += $disorder{$_} // 0 for $start .. $end;
+        push @records, {
+            class               => $class,
+            sequence            => $sequence,
+            start               => $start,
+            end                 => $end,
+            conserved           => $conserved{join "\t", $class, $sequence, $start} ? 1 : 0,
+            disordered_fraction => $disordered / ($end - $start + 1),
+        };
+    }
+    close $motifs;
+    return @records;
+}
+
+sub _prds {
+    my ($self, $genome, $id) = @_;
+    my $prd_file = "$genome->{home}/Seqs/$id/Motifs/prd_elm.txt";
+    return () if not -e $prd_file;
+    open my $prds, '<', $prd_file or die "Cannot read $prd_file: $!\n";
+    my @records;
+    while (my $line = <$prds>) {
+        next if $line =~ /^#/ or $line =~ /^\s*$/;
+        chomp $line;
+        my ($class, $domain, $start, $end) = split /\s+/, $line;
+        next if not defined $end;
+        push @records, {
+            class  => $class,
+            domain => $domain,
+            start  => $start,
+            end    => $end,
+        };
+    }
+    close $prds;
+    return @records;
+}
+
+sub _read_disorder {
+    my ($self, $file) = @_;
+    my %positions;
+    return %positions if not -e $file;
+    open my $input, '<', $file or die "Cannot read $file: $!\n";
+    my $position = 1;
+    while (my $line = <$input>) {
+        next if $line =~ /^>/ or $line =~ /^#/;
+        chomp $line;
+        for my $symbol (split //, $line) {
+            $positions{$position++} = $symbol eq 'D' ? 1 : 0;
+        }
+    }
+    close $input;
+    return %positions;
 }
 
 sub count_jobs {
-    my $s=shift;
-    return 0 if length($s->{gid})>6;
-    return 1;
-}
-    
-sub read_disorder
-{
-    my $input=shift;
-    my %pos=();
-    if(-e $input)
-    {
-        open DIS, "<", $input or die "Cannot open file $input to read from!\n";
-        my $cont=1;
-        while(<DIS>)
-        {
-            my $line=$_;
-            chomp $line;
-            next if($line =~ m/disorder/);
-            my @positions=split(//,$line);
-            foreach my $position (@positions)
-            {
-                if($position eq "D")
-                { $pos{$cont}=1;}
-                else {$pos{$cont}=0;}
-                $cont++;
-            }
-        }
-        close DIS;
-    }
-    return %pos;
+    my ($self) = @_;
+    return length($self->{gid}) > 6 ? 0 : 1;
 }
 
 1;

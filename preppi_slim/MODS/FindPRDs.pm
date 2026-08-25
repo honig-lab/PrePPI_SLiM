@@ -17,7 +17,7 @@ sub ginit {
     $s->{input}=$s->{seqfn} if defined $s->{seqd};
     $s->{output}=$s->{prds_elm} if defined $s->{seqd};
     $s->{output2}=$s->{seqd}."/Motifs/".$s->{gid}.".pfam" if defined $s->{seqd};
-    $s->{pgmopts}="$s->{input} $s->{output2} $s->{output}" if defined $s->{seqd};
+    $s->{pgmopts}="$s->{input} $s->{output2} $s->{output} $s->{gname} $s->{gid}" if defined $s->{seqd};
 }
 
 sub run {

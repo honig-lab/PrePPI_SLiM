@@ -82,7 +82,7 @@ def process_lr_file(args):
     if not os.path.exists(file_path):
         return None
     try:
-        return pd.read_csv(file_path, header=None, sep="\t",
+        return pd.read_csv(file_path, header=None, sep="\t", comment="#",
                            dtype={0: str, 1: str, 2: float, 3: str})
     except Exception as e:
         print(f"[{now()}] Error processing {hfpd_id}: {e}", flush=True)

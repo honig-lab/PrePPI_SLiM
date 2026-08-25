@@ -31,9 +31,13 @@ sub run {
         
         open MOTIFS, "<", $s->{input2} or die "Cannot open file $s->{input2} to read from!\n";
         open OUT, ">", $aux_out or die "Cannot open file $aux_out to read from!\n";
+        print OUT "# record_type=conserved_ELM_SLIM_candidates\n";
+        print OUT "# genome=$s->{gname}\tprotein=$s->{gid}\n";
+        print OUT "# ELM_class\tmotif_sequence\tmotif_start\n";
         while(<MOTIFS>)
         {
             my $line=$_;
+            next if $line =~ /^#/ || $line =~ /^\s*$/;
             chomp $line;
             my ($pdb,$seq,$init)=split(' ',$line);
             my $final=$init+length($seq)-1;

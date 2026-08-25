@@ -1,0 +1,283 @@
+PrePPI-SLiM pipeline flow
+==========================
+
+Purpose
+-------
+Predict protein-protein interactions mediated by a peptide-recognition domain
+(PRD) in one protein and a short linear motif (SLiM) in another protein. A raw
+candidate requires the PRD and SLiM to map to the same ELM class. ELM class,
+motif disorder, and motif conservation evidence are then combined into a
+likelihood ratio (LR).
+
+Pipeline tree
+-------------
+
+Input protein FASTA
+|
++-- Step 1: set up one genome/run and predict disorder
+|   |
+|   +-- assign or preserve HFPD identifiers
+|   +-- create fasta/id_list, fasta/map_list, Seqs/, and Pipeline/
+|   `-- run IUPred independently for every protein
+|       `-- Seqs/<ID>/disorder.fa
+|
++-- Step 2: annotate each protein independently
+|   |
+|   +-- FindMotifs_ELM
+|   |   +-- scan the sequence with ELM regular expressions
+|   |   `-- Seqs/<ID>/Motifs/motif_elm.txt
+|   |
+|   +-- FindPRDs_ELM
+|   |   +-- scan the sequence with Pfam HMMs linked to ELM classes
+|   |   +-- Seqs/<ID>/Motifs/<ID>.pfam
+|   |   `-- Seqs/<ID>/Motifs/prd_elm.txt
+|   |
+|   +-- Gopher
+|   |   +-- find orthologous sequences
+|   |   +-- Seqs/<ID>/Orthology/gopher.fas
+|   |   `-- Seqs/<ID>/Orthology/gopher.ort
+|   |
+|   +-- MuscleG
+|   |   +-- align the query and orthologs with MUSCLE
+|   |   `-- Seqs/<ID>/Aligns/Gopher.csv
+|   |
+|   `-- MotifConsv
+|       +-- test local conservation of each candidate motif
+|       `-- Seqs/<ID>/Motifs/motif_elm.csv
+|
++-- Step 3: enumerate compatible PRD-SLiM pairs
+|   |
+|   +-- choose an anchor genome (genome1)
+|   +-- choose a partner genome (genome2; defaults to genome1)
+|   +-- choose the role of genome1
+|   |   |
+|   |   +-- orientation=motif
+|   |   |   `-- genome1 SLiMs  --->  genome2 PRDs
+|   |   |
+|   |   `-- orientation=prd
+|   |       `-- genome1 PRDs   <---  genome2 SLiMs
+|   |
+|   +-- retain rows whose PRD and SLiM share an ELM class
+|   +-- attach motif conservation and disorder evidence
+|   `-- save all results below genome1/Seqs/, regardless of orientation
+|       |
+|       +-- genome1 supplies SLiMs; genome2 supplies PRDs
+|       |   `-- <genome1>_slim_<genome2>_prd_ProtPeptide_ELM.txt.tar.gz
+|       `-- genome2 supplies SLiMs; genome1 supplies PRDs
+|           `-- <genome2>_slim_<genome1>_prd_ProtPeptide_ELM.txt.tar.gz
+|
+`-- Step 4: calculate protein-pair likelihood ratios
+    |
+    +-- read every raw PRD-SLiM candidate row
+    +-- calculate
+    |   LR = LR(match) * LR(ELM class) * LR(disorder) * LR(conservation)
+    +-- retain the maximum LR when a protein pair has several matches
+    `-- write the filename selected with --lr-output below
+        Seqs/<ID>/Motifs/
+
+Optional downstream work, not part of the core prediction
+|
++-- apply an LR/FPR threshold to select high-confidence interactions
++-- map ELM/Pfam pairs to protein-peptide structures
+`-- build or analyze interaction networks
+
+Renumbering and the former 4a/4b behavior
+-------------------------------------------
+
+The standalone PrePPI-SLiM launcher now uses consecutive steps 1 through 4.
+This replaces the inherited PrePPI-SM labels 2, 4a, and 4b.
+
+Previously, SCR/run_elm.pl added ProtPeptide_ELM to the same controller as the
+per-protein annotation methods. That is why the old 4a created
+ProtPeptide_ELM.txt.tar.gz even when the separately labeled 4b had not run.
+ProtPeptide_ELM has now been removed from run_elm.pl. Annotation is step 2,
+pair enumeration is step 3, and LR scoring is step 4.
+
+Within- and cross-proteome commands
+-----------------------------------
+
+Annotate every genome folder independently before comparing it:
+
+  ./run_preppi_slim.sh --genome proteome_A --step 2
+  ./run_preppi_slim.sh --genome proteome_B --step 2
+
+Within one proteome (the two orientations are equivalent):
+
+  ./run_preppi_slim.sh --genome proteome_A --step 3
+
+Across two proteomes, genome1 SLiMs against genome2 PRDs:
+
+  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation motif
+
+Across two proteomes, genome1 PRDs against genome2 SLiMs, still saved under
+proteome_A:
+
+  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation prd
+
+Run both biological orientations and retain both under proteome_A:
+
+  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation both
+
+This writes the following directional archives below proteome_A/Seqs/<ID>/Motifs/:
+
+  proteome_A_slim_proteome_B_prd_ProtPeptide_ELM.txt.tar.gz
+  proteome_B_slim_proteome_A_prd_ProtPeptide_ELM.txt.tar.gz
+
+The low-level equivalent accepts one orientation per invocation:
+
+  SCR/run_PrP_ELM_batches.pl proteome_A --genome2 proteome_B \
+    --orientation motif
+  SCR/run_PrP_ELM_batches.pl proteome_A --genome2 proteome_B \
+    --orientation prd
+
+Each genome1/genome2/orientation combination has a distinct controller and
+per-protein working directory. The launcher therefore does not need to delete
+a shared ProtPeptide_ELM.pip between comparisons.
+
+Resetting a step
+----------------
+
+Use --reset-step with exactly one selected step to undo that step and exit. The
+step is not rerun. Files are moved into a timestamped backup rather than being
+permanently deleted, and the command refuses to reset a controller while its
+SLURM jobs are still active.
+
+For example, this removes the accidental within-proteome step-3 controller,
+working state, and directional archives for slim_002:
+
+  ./run_preppi_slim.sh --genome slim_002 --step 3 --reset-step
+
+For a specific cross-proteome direction, repeat the arguments that identify the
+comparison being reset:
+
+  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation motif --reset-step
+
+  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation both --reset-step
+
+Reset scope:
+
+  step 1  moves the entire genome/run directory to a sibling backup
+  step 2  moves annotation controllers, work areas, and annotation outputs
+  step 3  moves only the selected genome2/orientation pairing state and outputs
+  step 4  moves the LR controller and the selected --lr-output file
+
+Step-2, step-3, and step-4 backups are written below:
+
+  <genome>/Reset/step_<N>_<timestamp>_<process-id>/
+
+Step 1 cannot store its backup inside the genome being reset, so it uses:
+
+  <genome>.reset_step_1_<timestamp>_<process-id>
+
+When step 4 used a custom output name, provide the same name during reset:
+
+  ./run_preppi_slim.sh --genome proteome_A --step 4 \
+    --lr-output custom.lr --reset-step
+
+Resetting a step does not automatically reset later steps. If later results
+depend on the reset output, reset those later steps separately, from the latest
+step backward, before rerunning the earlier step.
+
+Raw pair record
+---------------
+
+Each ProtPeptide_ELM archive contains a tab-separated file with comment
+metadata followed by ten data columns:
+
+  # record_type=PrePPI-SLiM_PRD-SLiM_candidates
+  # motif_genome=<name>
+  # prd_genome=<name>
+  # anchor_genome=<name>  anchor_protein=<ID>  anchor_role=<motif-or-prd>
+  # motif_protein  prd_protein  ELM_class  prd_start  prd_end  ...
+
+The complete data columns are:
+
+  1. motif-side protein ID
+  2. PRD-side protein ID
+  3. shared ELM class
+  4. PRD start
+  5. PRD end
+  6. motif sequence
+  7. motif start
+  8. motif end
+  9. motif conservation indicator
+ 10. fraction of motif residues predicted to be disordered
+
+Output headers and no-hit files
+-------------------------------
+
+Generated scientific text files now carry provenance and column information.
+Tabular files use lines beginning with # so existing data rows remain unchanged
+and readers can skip the headers. disorder.fa and gopher.fas are FASTA files,
+so their identifiers remain FASTA headers. The <ID>.pfam output receives genome
+and protein metadata before the existing PfamScan comments and column header.
+
+A successful no-hit stage is still a valid result: its output contains headers
+but no data rows. A missing required output means that the stage failed or was
+blocked. This distinction is important for proteins with no predicted ELM motif
+or no ELM-associated Pfam PRD.
+
+For step-3 pairing, motif_elm.csv is optional. If it is absent for a protein,
+the pairing code keeps that protein's motif candidates and assigns conserved=0.
+The launcher reports one summary count for these proteins but does not block
+submission. The required pairing inputs remain disorder.fa and motif_elm.txt on
+the motif side, and prd_elm.txt on the PRD side. The raw <ID>.pfam file is not
+reread during pairing because prd_elm.txt already contains the relevant
+ELM-associated PRD calls.
+
+The default health check scans every protein before submitting step 3. For
+orientation=both it checks each proteome once. On a large shared-filesystem
+proteome this can still take noticeable time. If both genome folders have
+already been validated, bypass the scan explicitly with:
+
+  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation both --skip-health-check
+
+This option reduces submission latency but also removes the protection against
+missing disorder.fa, motif_elm.txt, or prd_elm.txt inputs.
+
+Batched all-versus-all operation
+--------------------------------
+
+If one proteome is split into N genome folders, complete coverage requires every
+motif-side batch to be compared with every PRD-side batch:
+
+  motif batch 1  --->  PRD batches 1..N
+  motif batch 2  --->  PRD batches 1..N
+  ...
+  motif batch N  --->  PRD batches 1..N
+
+Direction-specific archives name the motif and PRD genomes explicitly. Before
+using the current step-4 LR wrapper, consolidate the desired raw archives for
+each anchor protein into the conventional ProtPeptide_ELM.txt.tar.gz name, as in
+the historical batch workflow. This prevents one direction from silently
+overwriting the other and makes the scored input explicit.
+
+Scientific implementation notes
+-------------------------------
+
+- The 2015 work introduced the broader genome-wide PRD/peptide interaction
+  framework. The 2026 PrePPI-SLiM model described here uses ELM class, motif
+  disorder, and motif conservation evidence and takes the maximum candidate LR
+  for a protein pair.
+- The papers describe motif disorder as the average raw IUPred residue score
+  thresholded at 0.5. The current code converts each residue to D or non-D,
+  calculates the fraction of D residues in the motif, and thresholds that
+  fraction at 0.5 in the Python LR calculation. Check this implementation detail
+  before claiming exact reproduction of the published scoring model.
+- The historical exclude_count variable changed how many jobs a wrapper waited
+  for; it did not itself exclude proteins from computation.
+
+Scientific references
+---------------------
+
+- Saha A, Honig B. Proteome-wide prediction of interactions between structured
+  domains and peptide motifs reveals functionally coherent subnetworks. PNAS,
+  2026.
+- Chen TS, Petrey D, Garzon JI, Honig B. Predicting Peptide-Mediated
+  Interactions on a Genome-Wide Scale. PLoS Computational Biology, 2015.

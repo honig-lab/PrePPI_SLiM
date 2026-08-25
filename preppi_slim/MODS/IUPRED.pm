@@ -39,7 +39,7 @@ sub run {
     
     my $dis_fn="$s->{seqd}/disorder.fa";
     open(OUT,">$dis_fn") or die("Could not open $dis_fn.");
-    print OUT ">disorder\n";
+    print OUT ">disorder genome=$s->{gname} protein=$s->{gid} encoding=D_if_IUPred_score_gt_0.5\n";
     foreach (@dis) {
         if ($_ =~ /^#/) { next; }
         my @parts = split (' ',$_);

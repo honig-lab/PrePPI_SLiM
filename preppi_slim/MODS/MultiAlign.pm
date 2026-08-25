@@ -32,7 +32,8 @@ sub run {
     {
         my $aux_out=$s->{wrkdir}."/output.txt";
         
-        $s->{pgmopts}=" -i ".$s->{seqfn}." -f ".$s->{input}."  -o ".$aux_out ;
+        $s->{pgmopts}=" -i ".$s->{seqfn}." -f ".$s->{input}." -o ".$aux_out.
+                       " -g ".$s->{gname}." -p ".$s->{gid};
         $s->MODS::Method::run();
         print STDERR `mv $aux_out $s->{output}`;
     }

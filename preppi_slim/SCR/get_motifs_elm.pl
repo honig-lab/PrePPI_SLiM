@@ -3,6 +3,8 @@ use MODS::Globals;
 
 my $fa = shift;
 my $ofile = shift;
+my $genome = shift // 'unknown';
+my $protein = shift // 'unknown';
 
 my $elm_file = "$ELM_CLASSES";
 my %lig_class = read_motif_file_new($elm_file);
@@ -21,6 +23,9 @@ close IFH;
 my @motifs = run_search_new($seq,\%lig_class);
 
 open OFH, ">", $ofile or die "Cannot open $ofile to write into!\n";
+print OFH "# record_type=ELM_SLIM_candidates\n";
+print OFH "# genome=$genome\tprotein=$protein\n";
+print OFH "# ELM_class\tmotif_sequence\tmotif_start\tmotif_end\n";
 foreach my $motif (@motifs)
 {
     my $mseq = $motif->[0];
@@ -121,4 +126,3 @@ sub run_search_new
 
     return @output;
 }
-

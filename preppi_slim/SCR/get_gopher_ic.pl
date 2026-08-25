@@ -16,14 +16,14 @@ my $PGM = $0;                   #name of program
 $PGM =~ s#.*/##;                #remove part up to last slash
 my $usage = <<USAGE;
 USAGE:
-        $PGM  -i fasta_file -f gopher_orthologs -o output
+        $PGM  -i fasta_file -f gopher_orthologs -o output [-g genome] [-p protein]
         options:
 		-h	this help
 
 USAGE
 
 my %options = ();
-getopts ( 'i:f:o:h', \%options );
+getopts ( 'i:f:o:g:p:h', \%options );
 
 
 
@@ -33,6 +33,8 @@ if ( $options{h} || ( not defined ( $options{f} ) ) || ( not defined ( $options{
 my $seq_id = $options{i};
 my $output = $options{o};
 my $gopher_fa = $options{f}; 
+my $genome = $options{g} // 'unknown';
+my $protein = $options{p} // 'unknown';
 
 
 # get the fasta name for the query, so later we know which protein in the muscle alignment file is our query
@@ -179,6 +181,9 @@ for (my $i = 0; $i <= $#positions; $i++)
 }
   
 open OFH, ">", $output or die "Cannot open $output to write into!\n";
+print OFH "# record_type=per_residue_ortholog_conservation\n";
+print OFH "# genome=$genome\tprotein=$protein\n";
+print OFH "# residue_position\tamino_acid\tinformation_content\n";
 for (my $i = 0; $i <= $#positions; $i++)
 {
     my $index = $i+1;
@@ -189,5 +194,4 @@ for (my $i = 0; $i <= $#positions; $i++)
 close OFH;                
 unlink $muscle_align_ofile
     or warn "Cannot remove temporary MUSCLE alignment $muscle_align_ofile: $!\n";
-
 

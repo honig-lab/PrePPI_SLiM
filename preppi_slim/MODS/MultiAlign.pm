@@ -17,7 +17,7 @@ sub ginit {
      $s->{cmd}="$MAIN_DIRECTORY/SCR/get_gopher_ic.pl";;
      $s->{holds}="Gopher";
      return $s if not defined $s->{seqd};
-     $s->{output}="$s->{seqd}/Aligns/Gopher.csv";
+     $s->{output}="$s->{seqd}/Aligns/residue_conservation.csv";
      $s->{input}="$s->{seqd}/Orthology/gopher.fas";
      return $s;
 }

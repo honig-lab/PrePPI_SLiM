@@ -25,7 +25,7 @@ my @motifs = run_search_new($seq,\%lig_class);
 open OFH, ">", $ofile or die "Cannot open $ofile to write into!\n";
 print OFH "# record_type=ELM_SLIM_candidates\n";
 print OFH "# genome=$genome\tprotein=$protein\n";
-print OFH "# ELM_class\tmotif_sequence\tmotif_start\tmotif_end\n";
+print OFH "elm_class,motif_sequence,motif_start,motif_end\n";
 foreach my $motif (@motifs)
 {
     my $mseq = $motif->[0];
@@ -33,7 +33,7 @@ foreach my $motif (@motifs)
     my $mstart = $motif->[2];
     my $mend = $motif->[3];
 
-    print OFH "$class\t$mseq\t$mstart\t$mend\n";
+    print OFH "$class,$mseq,$mstart,$mend\n";
 }
 close OFH;
 

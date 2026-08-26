@@ -45,8 +45,8 @@ sub ginit {
 
     $self->{gopher_groups} = "$self->{seqd}/Orthology/gopher.ort";
     $self->{motifs} = "$self->{seqd}/Motifs/motif.txt";
-    $self->{motifs_elm} = "$self->{seqd}/Motifs/motif_elm.txt";
-    $self->{prds_elm} = "$self->{seqd}/Motifs/prd_elm.txt";
+    $self->{motifs_elm} = "$self->{seqd}/Motifs/slim_candidates.csv";
+    $self->{prds_elm} = "$self->{seqd}/Motifs/prd_candidates.csv";
 }
 
 sub default_opts { return ''; }

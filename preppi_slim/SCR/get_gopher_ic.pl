@@ -183,15 +183,14 @@ for (my $i = 0; $i <= $#positions; $i++)
 open OFH, ">", $output or die "Cannot open $output to write into!\n";
 print OFH "# record_type=per_residue_ortholog_conservation\n";
 print OFH "# genome=$genome\tprotein=$protein\n";
-print OFH "# residue_position\tamino_acid\tinformation_content\n";
+print OFH "residue_position,amino_acid,information_content\n";
 for (my $i = 0; $i <= $#positions; $i++)
 {
     my $index = $i+1;
     my $aa = substr $qaln_nogap, $i, 1;
     my $ic = $ic_list[$i]; 
-    print OFH "$index $aa $ic\n";
+    print OFH "$index,$aa,$ic\n";
 } 
 close OFH;                
 unlink $muscle_align_ofile
     or warn "Cannot remove temporary MUSCLE alignment $muscle_align_ofile: $!\n";
-

@@ -82,11 +82,11 @@ sub read_consv
     {
         next if (/^#/);
         next if ($_ !~ /[0-9]/);
-        my @fields = split " ", $_;
+        next if (/^residue_position,/i);
+        my @fields = /,/ ? split(/,/) : split(" ", $_);
         push(@consv, $fields[2]);
     }
     close IFH;
 
     return @consv;
 }
-

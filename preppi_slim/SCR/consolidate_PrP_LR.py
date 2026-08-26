@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Consolidate ProtPeptide ELM .lr files across HFPD batches or a single directory.
+Consolidate PrePPI-SLiM LR CSV files across batches or one genome directory.
 
 USAGE EXAMPLES
 --------------
@@ -23,9 +23,8 @@ import numpy as np
 import pandas as pd
 
 
-# --------------------------- CONSTANT PATH --------------------------- #
-GENOME_DIR = "/groups/bh6_gp/data/shares/databases/hfpd/genomes/"
-# --------------------------------------------------------------------- #
+GENOME_DIR = os.environ.get(
+    "HFPD_DATA_DIR", "/groups/bh6_gp/data/shares/databases/hfpd/genomes")
 
 
 def now():
@@ -53,16 +52,16 @@ def to_bool(s):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Consolidate ProtPeptide ELM .lr files across HFPD batches or a single directory."
+        description="Consolidate PrePPI-SLiM LR CSV files across genome folders."
     )
     parser.add_argument("--base-dir", required=True,
                         help="Base directory name (e.g., human_AF_AS).")
     parser.add_argument("--batch", type=to_bool, required=True,
                         help="True to look for <base-dir>_batch*; False to process <base-dir> only.")
     parser.add_argument("--lr-filename", required=True,
-                        help="Name of the per-sequence .lr file under Seqs/<id>/Motifs/.")
+                        help="Name of the per-sequence LR CSV under Seqs/<id>/Motifs/.")
     parser.add_argument("--output", required=True,
-                        help="Output .gz TSV file (absolute path).")
+                        help="Output .csv.gz file (absolute path).")
     parser.add_argument("--mode", choices=["max", "topk"], default="topk",
                         help="Selection mode: 'max' or 'topk'.")
     parser.add_argument("--topk", type=int, default=5,
@@ -82,8 +81,8 @@ def process_lr_file(args):
     if not os.path.exists(file_path):
         return None
     try:
-        return pd.read_csv(file_path, header=None, sep="\t", comment="#",
-                           dtype={0: str, 1: str, 2: float, 3: str})
+        return pd.read_csv(file_path, comment="#", compression="infer",
+                           dtype=str)
     except Exception as e:
         print(f"[{now()}] Error processing {hfpd_id}: {e}", flush=True)
         return None
@@ -106,22 +105,18 @@ def resolve_batch_dirs(base_dir, batch_flag):
         return [dir_path]
 
 
-def build_map_dict_from_batches(batch_dirs):
-    frames = []
-    for b in batch_dirs:
-        map_path = os.path.join(b, "fasta/map_list")
+def build_map_dict(genome_names):
+    mapping = {}
+    for genome_name in sorted(genome_names):
+        map_path = os.path.join(GENOME_DIR, genome_name, "fasta", "map_list")
         if not os.path.exists(map_path):
-            print(f"[{now()}] WARNING: Missing map_list in {os.path.basename(b)}", flush=True)
+            print(f"[{now()}] WARNING: Missing map_list in {genome_name}", flush=True)
             continue
         df = pd.read_csv(map_path, sep="\t", header=None, dtype=str, names=["HFPD_ID", "UniProt_ID"])
-        frames.append(df)
-    if not frames:
-        raise SystemExit(f"[{now()}] ERROR: No map_list files found.")
-    df = pd.concat(frames, ignore_index=True).dropna()
-    df["UniProt_ID"] = df["UniProt_ID"].str.lstrip(">")
-    df = df.drop_duplicates(subset=["HFPD_ID"], keep="first")
-    print(f"[{now()}] Built UniProt map | Unique IDs={df['HFPD_ID'].nunique():,}", flush=True)
-    return df.set_index("HFPD_ID")["UniProt_ID"].to_dict()
+        for hfpd_id, uniprot_id in df.dropna().itertuples(index=False):
+            mapping[(genome_name, hfpd_id)] = uniprot_id.lstrip(">")
+    print(f"[{now()}] Built UniProt map | Entries={len(mapping):,}", flush=True)
+    return mapping
 
 
 def iter_all_dataframes(batch_dirs, lr_filename, workers):
@@ -154,18 +149,20 @@ def iter_all_dataframes(batch_dirs, lr_filename, workers):
 
 
 def build_key(df):
-    id1 = df.iloc[:, 0].values
-    id2 = df.iloc[:, 1].values
-    df["key"] = np.where(id1 < id2, id1 + "_" + id2, id2 + "_" + id1)
+    df["key"] = (
+        df["protein1_genome"] + ":" + df["protein1_id"] + "|" +
+        df["protein2_genome"] + ":" + df["protein2_id"]
+    )
+    df["likelihood_ratio"] = pd.to_numeric(df["likelihood_ratio"], errors="coerce")
     return df
 
 
 def select_rows(df, mode, topk):
     if mode == "max":
-        picked = df.loc[df.groupby("key")[2].idxmax()].copy()
+        picked = df.loc[df.groupby("key")["likelihood_ratio"].idxmax()].copy()
         how = "max"
     else:
-        picked = (df.sort_values(2, ascending=False)
+        picked = (df.sort_values("likelihood_ratio", ascending=False)
                     .groupby("key", group_keys=False, as_index=False)
                     .head(topk)
                     .copy())
@@ -184,7 +181,7 @@ def main():
 
     dfs = list(iter_all_dataframes(batch_dirs, args.lr_filename, args.workers))
     if not dfs:
-        raise SystemExit(f"[{now()}] ERROR: No .lr rows found.")
+        raise SystemExit(f"[{now()}] ERROR: No LR CSV rows found.")
     df_all = pd.concat(dfs, ignore_index=True)
     print(f"[{now()}] Loaded {len(df_all):,} total rows.", flush=True)
 
@@ -192,28 +189,35 @@ def main():
     df_sel, how = select_rows(df_all, args.mode, args.topk)
     print(f"[{now()}] Selected {how.upper()} | Kept {len(df_sel):,} rows.", flush=True)
 
-    df_sel.sort_values(by=[0, 1], key=lambda s: s.astype(int), inplace=True)
+    df_sel.sort_values(
+        by=["protein1_genome", "protein1_id", "protein2_genome", "protein2_id"],
+        inplace=True,
+    )
     df_sel.drop(columns=["key"], inplace=True)
 
-    map_dict = build_map_dict_from_batches(batch_dirs)
-    df_sel["UniProt_ID1"] = df_sel.iloc[:, 0].map(map_dict)
-    df_sel["UniProt_ID2"] = df_sel.iloc[:, 1].map(map_dict)
-
-    df_sel = df_sel[["UniProt_ID1", "UniProt_ID2", 0, 1, 2, 3]]
-    df_sel = df_sel.rename(columns={0: "HFPD_ID1", 1: "HFPD_ID2", 2: "LR", 3: "ELM_Class"})
+    genome_names = set(df_sel["protein1_genome"]) | set(df_sel["protein2_genome"])
+    map_dict = build_map_dict(genome_names)
+    df_sel["protein1_uniprot"] = [
+        map_dict.get((genome_name, protein_id))
+        for genome_name, protein_id in zip(df_sel["protein1_genome"], df_sel["protein1_id"])
+    ]
+    df_sel["protein2_uniprot"] = [
+        map_dict.get((genome_name, protein_id))
+        for genome_name, protein_id in zip(df_sel["protein2_genome"], df_sel["protein2_id"])
+    ]
 
     n_before = len(df_sel)
-    df_sel = df_sel[~np.isinf(df_sel["LR"])].copy()
+    df_sel = df_sel[~np.isinf(df_sel["likelihood_ratio"])].copy()
     removed = n_before - len(df_sel)
     if removed:
         print(f"[{now()}] Removed {removed:,} rows with LR=inf", flush=True)
 
-    df_sel["LR"] = df_sel["LR"].round(args.round_dp)
+    df_sel["likelihood_ratio"] = df_sel["likelihood_ratio"].round(args.round_dp)
 
     print(f"[{now()}] Writing to {args.output}...", flush=True)
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with gzip.open(args.output, "wt") as f_out:
-        df_sel.to_csv(f_out, sep="\t", index=False, chunksize=args.chunksize)
+        df_sel.to_csv(f_out, index=False, chunksize=args.chunksize)
 
     dt = time.time() - start_time
     mins, secs = divmod(dt, 60)

@@ -15,7 +15,7 @@ Usage:
 
 Options:
   -g, --genome2 NAME       Partner genome (default: genome1)
-  -O, --orientation ROLE   Role of genome1: motif or prd (default: motif)
+  -O, --orientation ROLE   motif, prd, or both (default: both)
   -r, --reverse            Alias for --orientation prd
   -d, --debug              Retain per-task scheduler logs
   -q, --no-submit          Configure without submitting
@@ -25,13 +25,14 @@ Orientations:
   motif  SLiMs from genome1 are compared with PRDs from genome2.
   prd    PRDs from genome1 are compared with SLiMs from genome2; results still
          remain under genome1, grouped by its PRD-side protein IDs.
+  both   Evaluate both directions in one task and write one combined CSV.gz.
 USAGE
 
 my $gname = shift @ARGV;
 die $usage if not defined $gname;
 
 my ($genome2, $reverse, $debug, $no_submit, $help);
-my $orientation = 'motif';
+my $orientation = 'both';
 GetOptions(
     'g|genome2=s'     => \$genome2,
     'O|orientation=s' => \$orientation,
@@ -43,8 +44,8 @@ GetOptions(
 die $usage if $help;
 
 $orientation = 'prd' if $reverse;
-die "--orientation must be motif or prd\n"
-    if $orientation ne 'motif' and $orientation ne 'prd';
+die "--orientation must be motif, prd, or both\n"
+    if $orientation ne 'motif' and $orientation ne 'prd' and $orientation ne 'both';
 $genome2 //= $gname;
 
 my $genome = MODS::Genome->new(gname => $gname);

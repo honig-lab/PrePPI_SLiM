@@ -14,9 +14,9 @@ sub ginit {
      $s->{cmd}="$MAIN_DIRECTORY/SCR/get_motif_consv.pl";
      $s->{holds}="MuscleG,FindMotifs_ELM";
      return $s if not defined $s->{seqd};
-     $s->{output}="$s->{seqd}/Motifs/motif_elm.csv";
-     $s->{input}="$s->{seqd}/Aligns/Gopher.csv";
-     $s->{input2}="$s->{seqd}/Motifs/motif_elm.txt";
+     $s->{output}="$s->{seqd}/Motifs/conserved_slims.csv";
+     $s->{input}="$s->{seqd}/Aligns/residue_conservation.csv";
+     $s->{input2}="$s->{seqd}/Motifs/slim_candidates.csv";
      return $s;
 }
 
@@ -33,19 +33,20 @@ sub run {
         open OUT, ">", $aux_out or die "Cannot open file $aux_out to read from!\n";
         print OUT "# record_type=conserved_ELM_SLIM_candidates\n";
         print OUT "# genome=$s->{gname}\tprotein=$s->{gid}\n";
-        print OUT "# ELM_class\tmotif_sequence\tmotif_start\n";
+        print OUT "elm_class,motif_sequence,motif_start\n";
         while(<MOTIFS>)
         {
             my $line=$_;
             next if $line =~ /^#/ || $line =~ /^\s*$/;
             chomp $line;
-            my ($pdb,$seq,$init)=split(' ',$line);
+            next if $line =~ /^elm_class,/i;
+            my ($pdb,$seq,$init)=split(/,/,$line);
             my $final=$init+length($seq)-1;
             $s->{pgmopts}=" -i ".$init." -f ".$final."  -c ".$s->{input} ;
             my ($consv)=$s->MODS::Method::run();
             chomp($consv);
             print STDERR "$consv\n";
-            print OUT "$pdb\t$seq\t$init\n" if ($consv==1);
+            print OUT "$pdb,$seq,$init\n" if ($consv==1);
         }
         close MOTIFS;
         close OUT;

@@ -62,7 +62,7 @@ my %seq_domains = read_domains($dfile,\%elm_domains);
 open OFH, ">", $ofile or die "Cannot open $ofile to write into!\n";
 print OFH "# record_type=ELM_peptide_recognition_domains\n";
 print OFH "# genome=$genome\tprotein=$protein\n";
-print OFH "# ELM_class\tPfam_domain\tPRD_start\tPRD_end\n";
+print OFH "elm_class,pfam_domain,prd_start,prd_end\n";
 foreach my $dname (sort keys %seq_domains)
 {
     my @classes = sort keys %{$elm_domains{$dname}};
@@ -72,7 +72,7 @@ foreach my $dname (sort keys %seq_domains)
         {
             my $dstart = $dentry->{dstart};
             my $dend = $dentry->{dend};
-            print OFH "$class\t$dname\t$dstart\t$dend\n";
+            print OFH "$class,$dname,$dstart,$dend\n";
         } 
     }
 }

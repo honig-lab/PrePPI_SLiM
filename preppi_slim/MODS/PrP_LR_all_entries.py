@@ -10,7 +10,13 @@ import sys
 
 import pandas as pd
 
-from PrP_LR import open_text_output, readBNs, read_candidate_file
+from PrP_LR import (
+    get_prd_name,
+    open_text_output,
+    readBNs,
+    read_candidate_file,
+    row_text,
+)
 
 
 def process_candidate_file(args):
@@ -35,8 +41,10 @@ def process_candidate_file(args):
             )
             writer = csv.writer(output, lineterminator="\n")
             writer.writerow([
-                "motif_genome", "prd_genome", "motif_protein", "prd_protein",
-                "likelihood_ratio", "elm_class", "anchor_role",
+                "motif_genome", "motif_protein", "motif_start", "motif_end",
+                "prd_genome", "prd_protein", "prd_name",
+                "prd_start", "prd_end", "likelihood_ratio", "elm_class",
+                "anchor_role",
             ])
             rows = []
             for _, row in frame.iterrows():
@@ -53,12 +61,21 @@ def process_candidate_file(args):
                     * bnCsv.get(conserved, 0)
                     * bnDiso.get(str(disorder_bin), bnDiso.get(disorder_bin, 0))
                 )
+                motif_genome = row_text(row, "motif_genome")
+                motif_protein = row_text(row, "motif_protein")
+                prd_genome = row_text(row, "prd_genome")
+                prd_protein = row_text(row, "prd_protein")
+                prd_start = row_text(row, "prd_start")
+                prd_end = row_text(row, "prd_end")
+                prd_name = row_text(row, "prd_name") or get_prd_name(
+                    prd_genome, prd_protein, prd_start, prd_end)
                 rows.append([
-                    row["motif_genome"], row["prd_genome"],
-                    row["motif_protein"], row["prd_protein"], lr_value,
-                    elm_class, row["anchor_role"],
+                    motif_genome, motif_protein,
+                    row_text(row, "motif_start"), row_text(row, "motif_end"),
+                    prd_genome, prd_protein, prd_name, prd_start, prd_end,
+                    lr_value, elm_class, row_text(row, "anchor_role"),
                 ])
-            writer.writerows(sorted(rows, key=lambda item: -float(item[4])))
+            writer.writerows(sorted(rows, key=lambda item: -float(item[9])))
     except Exception as error:
         return f"Error writing output file {output_path}: {error}\n"
     return f"Wrote output file: {output_path}\n" if verbose else ""

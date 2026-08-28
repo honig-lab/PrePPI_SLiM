@@ -17,7 +17,8 @@ LEGACY_COLUMNS = [
 
 OUTPUT_COLUMNS = [
     "motif_genome", "prd_genome", "anchor_genome", "anchor_protein",
-    "anchor_role", *LEGACY_COLUMNS,
+    "anchor_role", "motif_protein", "prd_protein", "prd_name",
+    *LEGACY_COLUMNS[2:],
 ]
 
 
@@ -57,9 +58,10 @@ def read_legacy_archive(path, default_motif_genome, default_prd_genome,
                 motif_genome = metadata.get("motif_genome", default_motif_genome)
                 prd_genome = metadata.get("prd_genome", default_prd_genome)
                 anchor_role = metadata.get("anchor_role", default_anchor_role)
+                motif_protein, prd_protein, *remaining = fields
                 rows.append([
                     motif_genome, prd_genome, anchor_genome, anchor_protein,
-                    anchor_role, *fields,
+                    anchor_role, motif_protein, prd_protein, "", *remaining,
                 ])
     return rows
 

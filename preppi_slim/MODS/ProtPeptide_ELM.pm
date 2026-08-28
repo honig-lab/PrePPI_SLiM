@@ -66,7 +66,7 @@ sub run {
     print {$out} "# anchor_genome=$self->{gname}\tpartner_genome=$self->{partner_gname}\torientation=$self->{orientation}\n";
     print {$out} join(',', qw(
         motif_genome prd_genome anchor_genome anchor_protein anchor_role
-        motif_protein prd_protein elm_class prd_start prd_end motif_sequence
+        motif_protein prd_protein prd_name elm_class prd_start prd_end motif_sequence
         motif_start motif_end conserved disordered_fraction
     )), "\n";
     print {$out} "$_\n" for sort @rows;
@@ -122,6 +122,7 @@ sub _matching_rows {
                 $anchor_role,
                 $motif_id,
                 $prd_id,
+                $prd->{domain},
                 $motif->{class},
                 $prd->{start},
                 $prd->{end},

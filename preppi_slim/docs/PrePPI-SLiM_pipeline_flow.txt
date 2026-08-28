@@ -65,6 +65,9 @@ Input protein FASTA
     +-- canonicalize the two protein endpoints, including their genome names
     +-- retain the maximum LR across all candidates and both orientations
     `-- write Seqs/<ID>/Motifs/prd_slim_LR.csv.gz by default
+        +-- motif genome, protein, and residue range
+        +-- PRD genome, protein, Pfam domain name, and residue range
+        `-- LR and supporting ELM class
 
 Optional downstream work, not part of the core prediction
 |
@@ -114,9 +117,13 @@ Running the pipeline
 Interactive launcher
 --------------------
 
+The launcher is a Python 3 program. It automatically uses the required conda
+environment at /groups/bh6_gp/software/conda_envs/v2 and stops with an error if
+that environment is unavailable.
+
 Running the launcher without a complete command starts its interactive wizard:
 
-  ./run_preppi_slim.sh
+  ./run_preppi_slim.py
 
 It asks for the primary genome first, displays all four steps, asks for a step
 number, collects that step's required settings, lists its optional settings, and
@@ -124,31 +131,39 @@ offers to configure them. It then shows a run summary and asks for confirmation.
 
 The wizard can be requested even when some arguments were supplied:
 
-  ./run_preppi_slim.sh --interactive --genome proteome_A
+  ./run_preppi_slim.py --interactive --genome proteome_A
 
 For step 1, pressing Enter at the FASTA prompt selects input.fasta in the same
-directory as run_preppi_slim.sh:
+directory as run_preppi_slim.py:
 
   preppi_slim/tests/input.fasta
 
 Complete command-line invocations remain non-interactive and are suitable for
 scripts and reproducible HPC submissions.
 
+Step 4 prompts for the motif LR reference file and offers this default:
+
+  /groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/
+    human_AF_bn_training/test_006/motif_elm.lr
+
+Press Enter to accept it, or enter another path. For a non-interactive command,
+use --bn-file only when intentionally overriding that reference table.
+
 Command-line examples
 ---------------------
 
 Annotate every new genome folder independently before comparing it:
 
-  ./run_preppi_slim.sh --genome proteome_A --step 2
-  ./run_preppi_slim.sh --genome proteome_B --step 2
+  ./run_preppi_slim.py --genome proteome_A --step 2
+  ./run_preppi_slim.py --genome proteome_B --step 2
 
 Within one proteome, the two directions are equivalent and run once:
 
-  ./run_preppi_slim.sh --genome proteome_A --step 3
+  ./run_preppi_slim.py --genome proteome_A --step 3
 
 Across two proteomes, the default is both orientations in one task and file:
 
-  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B --step 3
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B --step 3
 
 This writes below every proteome_A/Seqs/<ID>/Motifs/ directory:
 
@@ -156,10 +171,10 @@ This writes below every proteome_A/Seqs/<ID>/Motifs/ directory:
 
 One direction can still be requested explicitly:
 
-  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B \
     --step 3 --orientation motif
 
-  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B \
     --step 3 --orientation prd
 
 The directional filenames state which genome supplies each feature:
@@ -197,7 +212,7 @@ LR scoring
 
 Run LR scoring with the same genome, genome2, and orientation used for step 3:
 
-  ./run_preppi_slim.sh --genome slim_002 --genome2 human_AF_slim \
+  ./run_preppi_slim.py --genome slim_002 --genome2 human_AF_slim \
     --step 4 --orientation both --bn-file <Bayesian-network.csv>
 
 Because both is the default, --orientation both may be omitted. The launcher
@@ -245,7 +260,7 @@ or legacy prd_elm.txt. The raw <ID>.pfam file is not reread during pairing.
 The health check scans each proteome once for orientation=both. For a previously
 validated large proteome, it can be bypassed explicitly:
 
-  ./run_preppi_slim.sh --genome proteome_A --genome2 proteome_B \
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B \
     --step 3 --skip-health-check
 
 Resetting a step
@@ -254,7 +269,7 @@ Resetting a step
 --reset-step undoes the selected step, creates a timestamped recoverable backup,
 and exits without rerunning it. Active SLURM work causes the reset to refuse.
 
-  ./run_preppi_slim.sh --genome slim_002 --genome2 human_AF_slim \
+  ./run_preppi_slim.py --genome slim_002 --genome2 human_AF_slim \
     --step 3 --orientation both --reset-step
 
 Reset scope:

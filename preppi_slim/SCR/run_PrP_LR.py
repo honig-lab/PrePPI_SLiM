@@ -28,6 +28,9 @@ import argparse
 import subprocess
 import shlex
 
+CONDA_ENV = "/groups/bh6_gp/software/conda_envs/v2"
+CONDA_PYTHON = os.path.join(CONDA_ENV, "bin", "python3")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Submit SLURM jobs for each batch directory")
@@ -46,6 +49,10 @@ def main():
     bn_file = args.b
     output_filename = args.o
     input_filename = args.input_filename
+    if not os.path.isfile(CONDA_PYTHON) or not os.access(CONDA_PYTHON, os.X_OK):
+        raise SystemExit(
+            f"Required conda environment is unavailable: {CONDA_ENV} "
+            f"(expected {CONDA_PYTHON})")
     genome_dir = os.environ.get(
         "HFPD_DATA_DIR", "/groups/bh6_gp/data/shares/databases/hfpd/genomes")
     preppi_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -80,11 +87,13 @@ def main():
 #SBATCH --time=09:00:00
 #SBATCH --partition=cpu
 
-# Load environment
-source ~/.bashrc
+# Use the required PrePPI-SLiM conda environment.
+export CONDA_PREFIX={shlex.quote(CONDA_ENV)}
+export CONDA_DEFAULT_ENV={shlex.quote(CONDA_ENV)}
+export PATH={shlex.quote(os.path.join(CONDA_ENV, "bin"))}:$PATH
 
 # Run the processing module for this batch.
-python {shlex.quote(module_file)} -batch {shlex.quote(batch)} \
+{shlex.quote(CONDA_PYTHON)} {shlex.quote(module_file)} -batch {shlex.quote(batch)} \
   -g {shlex.quote(genome)} -i {shlex.quote(input_filename)} \
   -b {shlex.quote(bn_file)} -o {shlex.quote(output_filename)} {"-v" if verbose else ""}
 """

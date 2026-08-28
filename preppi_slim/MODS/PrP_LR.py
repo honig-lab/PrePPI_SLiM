@@ -5,6 +5,7 @@
 import argparse
 import concurrent.futures
 import csv
+from functools import lru_cache
 import gzip
 import os
 import sys
@@ -15,7 +16,7 @@ import pandas as pd
 
 PAIR_COLUMNS = [
     "motif_genome", "prd_genome", "anchor_genome", "anchor_protein",
-    "anchor_role", "motif_protein", "prd_protein", "elm_class",
+    "anchor_role", "motif_protein", "prd_protein", "prd_name", "elm_class",
     "prd_start", "prd_end", "motif_sequence", "motif_start", "motif_end",
     "conserved", "disordered_fraction",
 ]
@@ -89,12 +90,16 @@ def read_candidate_file(path, default_genome):
         frame["anchor_genome"] = default_genome
         frame["anchor_protein"] = frame["motif_protein"]
         frame["anchor_role"] = "motif"
+        frame["prd_name"] = ""
         return frame[PAIR_COLUMNS]
 
     try:
         frame = pd.read_csv(path, comment="#", dtype=str, compression="infer")
     except pd.errors.EmptyDataError:
         return pd.DataFrame(columns=PAIR_COLUMNS)
+    # Candidate files produced before prd_name was added remain supported.
+    if "prd_name" not in frame.columns:
+        frame["prd_name"] = ""
     missing = set(PAIR_COLUMNS) - set(frame.columns)
     if missing:
         raise ValueError(f"candidate CSV is missing columns: {sorted(missing)}")
@@ -107,6 +112,39 @@ def canonical_pair(row):
         (str(row["prd_genome"]), str(row["prd_protein"])),
     ])
     return tuple(endpoints[0] + endpoints[1])
+
+
+def row_text(row, column):
+    """Return a clean CSV field instead of rendering missing values as 'nan'."""
+    value = row[column]
+    return "" if pd.isna(value) else str(value).strip()
+
+
+@lru_cache(maxsize=None)
+def get_prd_name(genome, protein_id, prd_start, prd_end):
+    """Find the Pfam HMM/domain name matching a PRD alignment range."""
+    genome_dir = os.environ.get(
+        "HFPD_DATA_DIR",
+        "/groups/bh6_gp/data/shares/databases/hfpd/genomes",
+    )
+    pfam_path = os.path.join(
+        genome_dir, genome, "Seqs", protein_id, "Motifs",
+        f"{protein_id}.pfam",
+    )
+    try:
+        with open(pfam_path, encoding="utf-8", errors="replace") as pfam_file:
+            for line in pfam_file:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                fields = line.split()
+                if len(fields) < 7:
+                    continue
+                if fields[1] == str(prd_start) and fields[2] == str(prd_end):
+                    return fields[6]
+    except OSError:
+        return ""
+    return ""
 
 
 def open_text_output(path):
@@ -147,8 +185,15 @@ def process_candidate_file(args):
             if key not in best or best[key][0] < lr_value:
                 best[key] = (
                     lr_value, elm_class,
-                    str(row["motif_genome"]), str(row["prd_genome"]),
-                    str(row["motif_protein"]), str(row["prd_protein"]),
+                    row_text(row, "motif_genome"),
+                    row_text(row, "motif_protein"),
+                    row_text(row, "motif_start"),
+                    row_text(row, "motif_end"),
+                    row_text(row, "prd_genome"),
+                    row_text(row, "prd_protein"),
+                    row_text(row, "prd_name"),
+                    row_text(row, "prd_start"),
+                    row_text(row, "prd_end"),
                 )
     except Exception as error:
         return f"Error processing candidate file {input_path}: {error}\n"
@@ -163,15 +208,21 @@ def process_candidate_file(args):
             )
             writer = csv.writer(output, lineterminator="\n")
             writer.writerow([
-                "protein1_genome", "protein1_id", "protein2_genome",
-                "protein2_id", "likelihood_ratio", "elm_class",
-                "motif_genome", "prd_genome", "motif_protein", "prd_protein",
+                "motif_genome", "motif_protein", "motif_start", "motif_end",
+                "prd_genome", "prd_protein", "prd_name",
+                "prd_start", "prd_end", "likelihood_ratio", "elm_class",
             ])
             for key in sorted(best):
-                lr_value, elm_class, motif_genome, prd_genome, motif_id, prd_id = best[key]
+                (
+                    lr_value, elm_class, motif_genome, motif_id,
+                    motif_start, motif_end, prd_genome, prd_id,
+                    prd_name, prd_start, prd_end,
+                ) = best[key]
                 writer.writerow([
-                    key[0], key[1], key[2], key[3], lr_value, elm_class,
-                    motif_genome, prd_genome, motif_id, prd_id,
+                    motif_genome, motif_id, motif_start, motif_end,
+                    prd_genome, prd_id, prd_name or get_prd_name(
+                        prd_genome, prd_id, prd_start, prd_end),
+                    prd_start, prd_end, lr_value, elm_class,
                 ])
         messages.append(f"Wrote output file: {output_path}\n")
     except Exception as error:

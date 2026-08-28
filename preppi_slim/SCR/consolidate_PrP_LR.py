@@ -149,9 +149,16 @@ def iter_all_dataframes(batch_dirs, lr_filename, workers):
 
 
 def build_key(df):
-    df["key"] = (
-        df["protein1_genome"] + ":" + df["protein1_id"] + "|" +
-        df["protein2_genome"] + ":" + df["protein2_id"]
+    required = {"motif_genome", "motif_protein", "prd_genome", "prd_protein"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"LR CSV is missing role-specific columns: {sorted(missing)}")
+    motif_endpoint = df["motif_genome"] + ":" + df["motif_protein"]
+    prd_endpoint = df["prd_genome"] + ":" + df["prd_protein"]
+    df["key"] = np.where(
+        motif_endpoint <= prd_endpoint,
+        motif_endpoint + "|" + prd_endpoint,
+        prd_endpoint + "|" + motif_endpoint,
     )
     df["likelihood_ratio"] = pd.to_numeric(df["likelihood_ratio"], errors="coerce")
     return df
@@ -190,20 +197,20 @@ def main():
     print(f"[{now()}] Selected {how.upper()} | Kept {len(df_sel):,} rows.", flush=True)
 
     df_sel.sort_values(
-        by=["protein1_genome", "protein1_id", "protein2_genome", "protein2_id"],
+        by=["motif_genome", "motif_protein", "prd_genome", "prd_protein"],
         inplace=True,
     )
     df_sel.drop(columns=["key"], inplace=True)
 
-    genome_names = set(df_sel["protein1_genome"]) | set(df_sel["protein2_genome"])
+    genome_names = set(df_sel["motif_genome"]) | set(df_sel["prd_genome"])
     map_dict = build_map_dict(genome_names)
-    df_sel["protein1_uniprot"] = [
+    df_sel["motif_protein_uniprot"] = [
         map_dict.get((genome_name, protein_id))
-        for genome_name, protein_id in zip(df_sel["protein1_genome"], df_sel["protein1_id"])
+        for genome_name, protein_id in zip(df_sel["motif_genome"], df_sel["motif_protein"])
     ]
-    df_sel["protein2_uniprot"] = [
+    df_sel["prd_protein_uniprot"] = [
         map_dict.get((genome_name, protein_id))
-        for genome_name, protein_id in zip(df_sel["protein2_genome"], df_sel["protein2_id"])
+        for genome_name, protein_id in zip(df_sel["prd_genome"], df_sel["prd_protein"])
     ]
 
     n_before = len(df_sel)

@@ -42,8 +42,8 @@ def process_candidate_file(args):
             writer = csv.writer(output, lineterminator="\n")
             writer.writerow([
                 "motif_genome", "motif_protein", "motif_start", "motif_end",
-                "prd_genome", "prd_protein", "prd_name",
-                "prd_start", "prd_end", "likelihood_ratio", "elm_class",
+                "elm_class", "prd_genome", "prd_protein", "prd_name",
+                "prd_start", "prd_end", "likelihood_ratio",
                 "anchor_role",
             ])
             rows = []
@@ -72,10 +72,10 @@ def process_candidate_file(args):
                 rows.append([
                     motif_genome, motif_protein,
                     row_text(row, "motif_start"), row_text(row, "motif_end"),
-                    prd_genome, prd_protein, prd_name, prd_start, prd_end,
-                    lr_value, elm_class, row_text(row, "anchor_role"),
+                    elm_class, prd_genome, prd_protein, prd_name,
+                    prd_start, prd_end, lr_value, row_text(row, "anchor_role"),
                 ])
-            writer.writerows(sorted(rows, key=lambda item: -float(item[9])))
+            writer.writerows(sorted(rows, key=lambda item: -float(item[10])))
     except Exception as error:
         return f"Error writing output file {output_path}: {error}\n"
     return f"Wrote output file: {output_path}\n" if verbose else ""

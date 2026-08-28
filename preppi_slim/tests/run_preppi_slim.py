@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
   2  Annotate each protein with motifs, PRDs, and conservation
   3  Enumerate compatible PRD-SLiM pairs
   4  Calculate likelihood ratios from pair-candidate CSV.gz files
+  5  Consolidate directional LR results under Interactions
 """
     parser = argparse.ArgumentParser(
         description="Run one PrePPI-SLiM pipeline step.",
@@ -47,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="input FASTA (default: input.fasta beside this launcher)",
     )
     parser.add_argument(
-        "-s", "--step", "--steps", type=int, choices=(1, 2, 3, 4),
+        "-s", "--step", "--steps", type=int, choices=(1, 2, 3, 4, 5),
         help="one pipeline step to run",
     )
     parser.add_argument(
@@ -66,6 +67,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-o", "--lr-output", default="prd_slim_LR.csv.gz",
         help="per-query step-4 output filename",
+    )
+    parser.add_argument(
+        "--consolidated-output",
+        help="step-5 filename under <genome>/Interactions",
     )
     parser.add_argument("--batch", action="store_true")
     parser.add_argument("--skip-health-check", action="store_true")
@@ -143,8 +148,9 @@ def configure_interactively(args: argparse.Namespace, script_dir: Path) -> None:
         print("  2  Annotate motifs, PRDs, orthologs, and conservation")
         print("  3  Enumerate compatible PRD-SLiM pairs")
         print("  4  Calculate protein-pair likelihood ratios")
+        print("  5  Consolidate directional LR results under Interactions")
         selected = prompt("Select step number")
-        if selected not in {"1", "2", "3", "4"}:
+        if selected not in {"1", "2", "3", "4", "5"}:
             raise SystemExit(f"Invalid step: {selected}")
         args.step = int(selected)
 
@@ -156,7 +162,7 @@ def configure_interactively(args: argparse.Namespace, script_dir: Path) -> None:
             args.fasta = script_dir / args.fasta
     elif args.step == 2:
         print("  No additional required settings.")
-    else:
+    elif args.step in (3, 4):
         args.genome2 = prompt("Partner genome", args.genome2 or args.genome)
         label = (
             "Orientation: motif, prd, or both"
@@ -168,6 +174,9 @@ def configure_interactively(args: argparse.Namespace, script_dir: Path) -> None:
         args.orientation = selected_orientation
         if args.step == 4:
             args.bn_file = Path(prompt("Motif LR reference file", str(args.bn_file)))
+    else:
+        args.genome2 = prompt("Partner genome", args.genome2 or args.genome)
+        print("  No additional required settings.")
 
     print(f"\nOptional settings for step {args.step}:")
     if args.step == 1:
@@ -179,6 +188,10 @@ def configure_interactively(args: argparse.Namespace, script_dir: Path) -> None:
         print(f"  --lr-output NAME   output filename (default: {args.lr_output})")
         print("  --batch            process matching batch genome folders")
         print("  --bn-file FILE     override the default reference LR table")
+    elif args.step == 5:
+        print(f"  --lr-output NAME   per-query input (default: {args.lr_output})")
+        print("  --consolidated-output NAME  override the final filename")
+        print("  --batch            read matching batch genome folders")
     print("  --debug, --dry-run, --reset-step")
 
     if yes_no("Configure optional settings?"):
@@ -203,6 +216,14 @@ def configure_interactively(args: argparse.Namespace, script_dir: Path) -> None:
             args.pair_input = None if pair_input == "automatically derived" else pair_input
             args.lr_output = prompt("LR-output filename", args.lr_output)
             args.batch = yes_no("Use batch mode?", args.batch)
+        elif args.step == 5:
+            args.lr_output = prompt("Per-query LR filename", args.lr_output)
+            default_name = consolidated_output_name(args)
+            args.consolidated_output = prompt(
+                "Consolidated output filename",
+                args.consolidated_output or default_name,
+            )
+            args.batch = yes_no("Use batch mode?", args.batch)
         args.debug = yes_no(
             "Retain per-task scheduler logs (--debug)?", args.debug
         )
@@ -220,11 +241,16 @@ def configure_interactively(args: argparse.Namespace, script_dir: Path) -> None:
     print(f"  Step:        {args.step}")
     if args.step == 1:
         print(f"  Input FASTA: {args.fasta}")
-    if args.step in (3, 4):
+    if args.step in (3, 4, 5):
         print(f"  Partner:     {args.genome2}")
+    if args.step in (3, 4):
         print(f"  Orientation: {args.orientation}")
     if args.step == 4:
         print(f"  LR table:    {args.bn_file}")
+    if args.step == 5:
+        print(
+            f"  Final file:  {args.consolidated_output or consolidated_output_name(args)}"
+        )
     if args.reset_step:
         print("  Action:      reset only")
     if args.dry_run:
@@ -251,10 +277,23 @@ def validate(args: argparse.Namespace, script_dir: Path) -> None:
         raise SystemExit(
             "--reset-step cannot be combined with incomplete-controller resets."
         )
+    if args.consolidated_output and (
+        "/" in args.consolidated_output
+        or args.consolidated_output in {".", ".."}
+    ):
+        raise SystemExit(
+            "--consolidated-output must be a filename, not a path."
+        )
+
+
+def consolidated_output_name(args: argparse.Namespace) -> str:
+    if args.genome == args.genome2:
+        return f"{args.genome}_PrePPI_SLiM_LR.csv.gz"
+    return f"{args.genome}_vs_{args.genome2}_PrePPI_SLiM_LR.csv.gz"
 
 
 class Pipeline:
-    """Execute and safely reset the four PrePPI-SLiM pipeline steps."""
+    """Execute and safely reset the five PrePPI-SLiM pipeline steps."""
 
     annotation_methods = (
         "FindMotifs_ELM", "FindPRDs_ELM", "Gopher", "MuscleG", "MotifConsv",
@@ -332,6 +371,12 @@ class Pipeline:
         return self.safe_name(
             f"{motif_genome}_slim_{prd_genome}_prd_candidates.csv.gz"
         )
+
+    def consolidated_output_path(self) -> Path:
+        filename = (
+            self.args.consolidated_output or consolidated_output_name(self.args)
+        )
+        return self.genome_home() / "Interactions" / filename
 
     def verify_disorder(self, genome: str) -> None:
         home = self.genome_home(genome)
@@ -610,7 +655,7 @@ class Pipeline:
                 )
             else:
                 print("The selected step 3 comparison was already absent.")
-        else:
+        elif self.args.step == 4:
             if "/" in self.args.lr_output or self.args.lr_output in {".", ".."}:
                 raise SystemExit(
                     "--lr-output must be a filename when resetting step 4."
@@ -634,6 +679,13 @@ class Pipeline:
                     )
             for batch_home in homes:
                 self.reset_step4_home(batch_home)
+        else:
+            self.begin_backup(home, 5)
+            self.backup_item(home, self.consolidated_output_path())
+            if self.reset_moved:
+                print(f"Step 5 reset. Backup: {self.reset_backup_root}")
+            else:
+                print("The selected consolidated output was already absent.")
 
     def run_pair_orientation(self, role: str) -> None:
         run_tag = f"{role}_{self.safe_name(self.genome2)}"
@@ -810,6 +862,18 @@ class Pipeline:
             "-o", self.args.lr_output,
         )
 
+    def step5(self) -> None:
+        output = self.consolidated_output_path()
+        print("[Step 5] Consolidating directional likelihood-ratio results")
+        self.run(
+            CONDA_PYTHON, self.slim_dir / "SCR" / "consolidate_PrP_LR.py",
+            "--base-dir", self.genome,
+            "--batch", str(self.args.batch),
+            "--lr-filename", self.args.lr_output,
+            "--output", output,
+            "--mode", "max",
+        )
+
     def execute(self) -> None:
         print(f"Primary/anchor genome: {self.genome}")
         print(f"Partner genome: {self.genome2}")
@@ -824,8 +888,10 @@ class Pipeline:
             self.step2()
         elif self.args.step == 3:
             self.step3()
-        else:
+        elif self.args.step == 4:
             self.step4()
+        else:
+            self.step5()
         print("Pipeline command completed. Submitted SLURM jobs may still be running.")
 
 

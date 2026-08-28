@@ -153,12 +153,9 @@ def build_key(df):
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"LR CSV is missing role-specific columns: {sorted(missing)}")
-    motif_endpoint = df["motif_genome"] + ":" + df["motif_protein"]
-    prd_endpoint = df["prd_genome"] + ":" + df["prd_protein"]
-    df["key"] = np.where(
-        motif_endpoint <= prd_endpoint,
-        motif_endpoint + "|" + prd_endpoint,
-        prd_endpoint + "|" + motif_endpoint,
+    df["key"] = (
+        df["motif_genome"] + ":" + df["motif_protein"] + "->" +
+        df["prd_genome"] + ":" + df["prd_protein"]
     )
     df["likelihood_ratio"] = pd.to_numeric(df["likelihood_ratio"], errors="coerce")
     return df
@@ -220,6 +217,20 @@ def main():
         print(f"[{now()}] Removed {removed:,} rows with LR=inf", flush=True)
 
     df_sel["likelihood_ratio"] = df_sel["likelihood_ratio"].round(args.round_dp)
+
+    preferred_columns = [
+        "motif_genome", "motif_protein_uniprot", "motif_protein",
+        "motif_start", "motif_end", "elm_class", "prd_genome",
+        "prd_protein_uniprot", "prd_protein", "prd_name", "prd_start",
+        "prd_end", "likelihood_ratio",
+    ]
+    existing_preferred = [
+        column for column in preferred_columns if column in df_sel.columns
+    ]
+    remaining = [
+        column for column in df_sel.columns if column not in existing_preferred
+    ]
+    df_sel = df_sel[existing_preferred + remaining]
 
     print(f"[{now()}] Writing to {args.output}...", flush=True)
     os.makedirs(os.path.dirname(args.output), exist_ok=True)

@@ -106,12 +106,12 @@ def read_candidate_file(path, default_genome):
     return frame[PAIR_COLUMNS]
 
 
-def canonical_pair(row):
-    endpoints = sorted([
-        (str(row["motif_genome"]), str(row["motif_protein"])),
-        (str(row["prd_genome"]), str(row["prd_protein"])),
-    ])
-    return tuple(endpoints[0] + endpoints[1])
+def directional_pair(row):
+    """Identify one mechanistic motif-to-PRD direction."""
+    return (
+        str(row["motif_genome"]), str(row["motif_protein"]),
+        str(row["prd_genome"]), str(row["prd_protein"]),
+    )
 
 
 def row_text(row, column):
@@ -181,7 +181,7 @@ def process_candidate_file(args):
                 * bnCsv.get(conserved, 0)
                 * bnDiso.get(str(disorder_bin), bnDiso.get(disorder_bin, 0))
             )
-            key = canonical_pair(row)
+            key = directional_pair(row)
             if key not in best or best[key][0] < lr_value:
                 best[key] = (
                     lr_value, elm_class,
@@ -209,8 +209,8 @@ def process_candidate_file(args):
             writer = csv.writer(output, lineterminator="\n")
             writer.writerow([
                 "motif_genome", "motif_protein", "motif_start", "motif_end",
-                "prd_genome", "prd_protein", "prd_name",
-                "prd_start", "prd_end", "likelihood_ratio", "elm_class",
+                "elm_class", "prd_genome", "prd_protein", "prd_name",
+                "prd_start", "prd_end", "likelihood_ratio",
             ])
             for key in sorted(best):
                 (
@@ -220,9 +220,9 @@ def process_candidate_file(args):
                 ) = best[key]
                 writer.writerow([
                     motif_genome, motif_id, motif_start, motif_end,
-                    prd_genome, prd_id, prd_name or get_prd_name(
+                    elm_class, prd_genome, prd_id, prd_name or get_prd_name(
                         prd_genome, prd_id, prd_start, prd_end),
-                    prd_start, prd_end, lr_value, elm_class,
+                    prd_start, prd_end, lr_value,
                 ])
         messages.append(f"Wrote output file: {output_path}\n")
     except Exception as error:

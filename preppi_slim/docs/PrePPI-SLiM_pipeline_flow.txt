@@ -57,17 +57,27 @@ Input protein FASTA
 |       `-- Seqs/<ID>/Motifs/
 |           <genome1>_vs_<genome2>_prd_slim_candidates.csv.gz
 |
-`-- Step 4: calculate protein-pair likelihood ratios
++-- Step 4: calculate directional protein-pair likelihood ratios
+|   |
+|   +-- read both orientations from the one step-3 CSV.gz
+|   +-- calculate
+|   |   LR = LR(match) * LR(ELM class) * LR(disorder) * LR(conservation)
+|   +-- retain the maximum LR for each exact motif-to-PRD direction
+|   |   +-- A motif ---> B PRD is one prediction
+|   |   `-- B motif ---> A PRD is a separate prediction
+|   `-- write Seqs/<ID>/Motifs/prd_slim_LR.csv.gz by default
+|       +-- motif genome, protein, residue range, and ELM class
+|       +-- PRD genome, protein, Pfam domain name, and residue range
+|       `-- likelihood ratio
+|
+`-- Step 5: consolidate the anchor genome's directional LR files
     |
-    +-- read both orientations from the one step-3 CSV.gz
-    +-- calculate
-    |   LR = LR(match) * LR(ELM class) * LR(disorder) * LR(conservation)
-    +-- canonicalize the two protein endpoints, including their genome names
-    +-- retain the maximum LR across all candidates and both orientations
-    `-- write Seqs/<ID>/Motifs/prd_slim_LR.csv.gz by default
-        +-- motif genome, protein, and residue range
-        +-- PRD genome, protein, Pfam domain name, and residue range
-        `-- LR and supporting ELM class
+    +-- read prd_slim_LR.csv.gz across all anchor HFPD IDs
+    +-- preserve both motif-to-PRD directions when both exist
+    +-- collapse only repeated copies of the same direction
+    +-- add UniProt identifiers from each genome's fasta/map_list
+    `-- write <genome>/Interactions/
+        `-- <genome>_vs_<genome2>_PrePPI_SLiM_LR.csv.gz
 
 Optional downstream work, not part of the core prediction
 |
@@ -219,8 +229,23 @@ Because both is the default, --orientation both may be omitted. The launcher
 derives the unified input filename and writes prd_slim_LR.csv.gz per anchor
 protein. Use --pair-input or --lr-output to override either filename.
 
-The LR output identifies both protein endpoints by genome and HFPD ID and also
-records the motif/PRD direction that produced the maximum LR.
+The LR output identifies the motif and PRD proteins explicitly. Opposite
+motif-to-PRD directions are retained separately for both intra- and
+inter-proteome searches. Only repeated candidates in the same direction are
+collapsed to the maximum LR.
+
+After step 4 has finished for every anchor HFPD ID, consolidate the results:
+
+  ./run_preppi_slim.py --genome slim_002 --genome2 human_AF_slim --step 5
+
+The default final output is:
+
+  slim_002/Interactions/
+    slim_002_vs_human_AF_slim_PrePPI_SLiM_LR.csv.gz
+
+For an intragenome run, the default name is
+<genome>_PrePPI_SLiM_LR.csv.gz. Use --consolidated-output to override only the
+filename; the file remains under the anchor genome's Interactions directory.
 
 Raw pair CSV columns
 --------------------
@@ -234,6 +259,7 @@ The unified CSV contains:
   anchor_role
   motif_protein
   prd_protein
+  prd_name
   elm_class
   prd_start
   prd_end
@@ -255,7 +281,9 @@ conserved=0. The launcher reports a summary count but does not block step 3.
 
 Required motif-side inputs are disorder.fa and either slim_candidates.csv or
 legacy motif_elm.txt. The required PRD-side input is either prd_candidates.csv
-or legacy prd_elm.txt. The raw <ID>.pfam file is not reread during pairing.
+or legacy prd_elm.txt. New pair files carry prd_name from prd_candidates.csv.
+For older pair files, step 4 can recover the domain name by matching the PRD
+range in <ID>.pfam.
 
 The health check scans each proteome once for orientation=both. For a previously
 validated large proteome, it can be bypassed explicitly:
@@ -278,8 +306,9 @@ Reset scope:
   step 2  moves annotation controllers, work areas, and old/new annotations
   step 3  moves the selected comparison controller, work, and pair outputs
   step 4  moves the LR controller and selected --lr-output file
+  step 5  moves the selected consolidated file from Interactions
 
-Step-2, step-3, and step-4 backups are written below:
+Step-2 through step-5 backups are written below:
 
   <genome>/Reset/step_<N>_<timestamp>_<process-id>/
 

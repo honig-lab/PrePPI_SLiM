@@ -26,6 +26,10 @@ import sys
 import glob
 import argparse
 import subprocess
+import shlex
+
+CONDA_ENV = "/groups/bh6_gp/software/conda_envs/v2"
+CONDA_PYTHON = os.path.join(CONDA_ENV, "bin", "python3")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -33,6 +37,8 @@ def main():
     parser.add_argument('-g', required=True, help="Genome basename (e.g., human_AF_AS)")
     parser.add_argument('-batch', required=True, help="Genome in Batches (True/False)")
     parser.add_argument('-b', required=True, help="Path to Bayesian network CSV file")
+    parser.add_argument('-i', '--input-filename', required=True,
+                        help="Per-protein candidate CSV.gz filename")
     parser.add_argument('-o', required=True, help="Output file name")
     parser.add_argument('-v', action='store_true', help="Verbose mode")
     args = parser.parse_args()
@@ -42,9 +48,15 @@ def main():
     batch_mode = args.batch.lower() in ["true", "1", "yes"]
     bn_file = args.b
     output_filename = args.o
-    genome_dir = "/groups/bh6_gp/data/shares/databases/hfpd/genomes"
-    preppi_dir = os.path.join(os.getcwd(), "../")
-    module_file = os.path.join(preppi_dir, "MODS/PrP_LR.py")
+    input_filename = args.input_filename
+    if not os.path.isfile(CONDA_PYTHON) or not os.access(CONDA_PYTHON, os.X_OK):
+        raise SystemExit(
+            f"Required conda environment is unavailable: {CONDA_ENV} "
+            f"(expected {CONDA_PYTHON})")
+    genome_dir = os.environ.get(
+        "HFPD_DATA_DIR", "/groups/bh6_gp/data/shares/databases/hfpd/genomes")
+    preppi_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    module_file = os.path.join(preppi_dir, "MODS", "PrP_LR.py")
     
     # Find batch directories matching the genome basename pattern.
     if batch_mode == True:
@@ -75,11 +87,15 @@ def main():
 #SBATCH --time=09:00:00
 #SBATCH --partition=cpu
 
-# Load environment
-source ~/.bashrc
+# Use the required PrePPI-SLiM conda environment.
+export CONDA_PREFIX={shlex.quote(CONDA_ENV)}
+export CONDA_DEFAULT_ENV={shlex.quote(CONDA_ENV)}
+export PATH={shlex.quote(os.path.join(CONDA_ENV, "bin"))}:$PATH
 
 # Run the processing module for this batch.
-python {module_file} -batch {batch} -g {genome} -b {bn_file} -o {output_filename} {"-v" if verbose else ""}
+{shlex.quote(CONDA_PYTHON)} {shlex.quote(module_file)} -batch {shlex.quote(batch)} \
+  -g {shlex.quote(genome)} -i {shlex.quote(input_filename)} \
+  -b {shlex.quote(bn_file)} -o {shlex.quote(output_filename)} {"-v" if verbose else ""}
 """
         # Write the sbatch script.
         with open(sbatch_script, 'w') as f:

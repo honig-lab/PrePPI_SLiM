@@ -1,8 +1,9 @@
 use strict;
 use warnings;
-use MODS::Globals;
-use lib $MAIN_DIRECTORY.'/MODS';
-use lib $IFS_HOME.'/shares/perl-5.40.0/modules/lib/perl5';
+use FindBin qw($RealBin);
+use lib "$RealBin/../../MODS";
+use lib (($ENV{HFPD_IFS_HOME} // "/groups/bh6_gp/home")
+         . "/shares/perl-5.40.0/modules/lib/perl5");
 use Bio::Pfam::Scan::PfamScan;
 use Getopt::Long;
 
@@ -332,4 +333,3 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 or see the on-line version at http://www.gnu.org/copyleft/gpl.txt
  
 =cut
-

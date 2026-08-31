@@ -5,7 +5,8 @@
 [PfamScan](https://github.com/SMRUCC/GCModeller/blob/master/src/interops/scripts/PfamScan/PfamScan/pfam_scan.pl) 
 is required for identifying peptide recognition domains (PRD) and is
 required by PrePPI's ELM-based protein-peptide interaction pipeline (e.g.
-run_elm.pl). It has two required third-party dependencies in the form of
+run_elm.py). The Python pipeline calls the third-party PfamScan program, which
+has two required dependencies in the form of
 Perl modules (Moose, BioPerl) that must be installed by CPAN.
 
 However, the versions of CPAN (/usr/bin/cpan) that are installed on the test

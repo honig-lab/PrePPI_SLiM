@@ -1,0 +1,22 @@
+# Python and notebook artifacts
+**/__pycache__/
+**/*.py[cod]
+**/.ipynb_checkpoints/
+
+# Editor, filesystem, and temporary artifacts
+.DS_Store
+**/.DS_Store
+**/.nfs*
+**/.vstags
+**/*.bck*
+
+# Local Codex/HPC synchronization files
+/before_codex.sh
+/apply_codex.sh
+/post_commit.sh
+/send_codex.sh
+/codex_changes.patch
+/codex_applied.patch
+/codex_applied.base
+/*.diff
+

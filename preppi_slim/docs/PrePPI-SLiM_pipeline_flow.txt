@@ -1,0 +1,397 @@
+PrePPI-SLiM pipeline flow
+==========================
+
+Purpose
+-------
+Predict protein-protein interactions mediated by a peptide-recognition domain
+(PRD) in one protein and a short linear motif (SLiM) in another protein. A raw
+candidate requires the PRD and SLiM to map to the same ELM class. ELM class,
+motif disorder, and motif conservation evidence are combined into a likelihood
+ratio (LR).
+
+Pipeline tree
+-------------
+
+Input protein FASTA
+|
++-- Step 1: set up one genome/run and predict disorder (Python)
+|   |
+|   +-- assign or preserve HFPD identifiers
+|   +-- write <genome>/seqs.csv
+|   |   `-- HFPD_ID, UniProt_ID, Description, Sequence, Length, Source
+|   +-- mark IDs containing "." as CDD; all others as Full-length
+|   +-- create Seqs/, Pipeline/, Interactions/, and tmp/
+|   `-- run IUPred independently for every protein
+|       `-- Seqs/<ID>/disorder.fa
+|
++-- Step 2: annotate each protein independently (Python controller/methods)
+|   |
+|   +-- FindMotifs_ELM
+|   |   +-- scan the sequence with ELM regular expressions
+|   |   `-- Seqs/<ID>/Motifs/slim_candidates.csv
+|   |
+|   +-- FindPRDs_ELM
+|   |   +-- scan the sequence with Pfam HMMs linked to ELM classes
+|   |   +-- Seqs/<ID>/Motifs/<ID>.pfam
+|   |   `-- Seqs/<ID>/Motifs/prd_candidates.csv
+|   |
+|   +-- Gopher
+|   |   +-- find orthologous sequences
+|   |   +-- Seqs/<ID>/Orthology/gopher.fas
+|   |   `-- Seqs/<ID>/Orthology/gopher.ort
+|   |
+|   +-- MuscleG
+|   |   +-- align the query and orthologs with MUSCLE
+|   |   `-- Seqs/<ID>/Aligns/residue_conservation.csv
+|   |
+|   `-- MotifConsv
+|       +-- test local conservation of each candidate SLiM
+|       `-- Seqs/<ID>/Motifs/conserved_slims.csv
+|
++-- Step 3: enumerate compatible PRD-SLiM pairs (Python)
+|   |
+|   +-- choose anchor genome1 and partner genome2
+|   +-- orientation=both by default for different proteomes
+|   |   +-- genome1 SLiMs  --->  genome2 PRDs
+|   |   `-- genome2 SLiMs  --->  genome1 PRDs
+|   +-- retain rows whose PRD and SLiM share an ELM class
+|   +-- attach motif conservation and disorder evidence
+|   `-- write one gzip-compressed CSV per anchor protein
+|       `-- Seqs/<ID>/Motifs/
+|           <genome1>_vs_<genome2>_prd_slim_candidates.csv.gz
+|
++-- Step 4: calculate directional protein-pair likelihood ratios (Python)
+|   |
+|   +-- read both orientations from the one step-3 CSV.gz
+|   +-- calculate
+|   |   LR = LR(match) * LR(ELM class) * LR(disorder) * LR(conservation)
+|   +-- retain the maximum LR for each exact motif-to-PRD direction
+|   |   +-- A motif ---> B PRD is one prediction
+|   |   `-- B motif ---> A PRD is a separate prediction
+|   `-- write Seqs/<ID>/Motifs/prd_slim_LR.csv.gz by default
+|       +-- motif genome, protein, residue range, and ELM class
+|       +-- PRD genome, protein, Pfam domain name, and residue range
+|       `-- likelihood ratio
+|
+`-- Step 5: consolidate the anchor genome's directional LR files (Python)
+    |
+    +-- read prd_slim_LR.csv.gz across all anchor HFPD IDs
+    +-- preserve both motif-to-PRD directions when both exist
+    +-- collapse only repeated copies of the same direction
+    +-- add UniProt identifiers from each genome's seqs.csv
+    `-- write <genome>/Interactions/
+        `-- <genome>_vs_<genome2>_PrePPI_SLiM_LR.csv.gz
+
+Optional downstream work, not part of the core prediction
+|
++-- apply an LR/FPR threshold to select high-confidence interactions
++-- map ELM/Pfam pairs to protein-peptide structures
+`-- build or analyze interaction networks
+
+Why the old motif filenames were confusing
+-------------------------------------------
+
+The legacy files had different biological meanings despite similar names:
+
+  motif_elm.txt  all sequence matches to ELM SLiM regular expressions
+  motif_elm.csv  only the subset that passed the conservation test
+
+They were also tab-delimited even though one used a .csv extension. New step-2
+runs use true comma-separated files with short, descriptive names:
+
+  slim_candidates.csv   all candidate SLiMs
+  conserved_slims.csv   conserved subset of the SLiM candidates
+  prd_candidates.csv    ELM-associated Pfam PRD calls
+
+Step 3 remains read-compatible with motif_elm.txt, motif_elm.csv, and
+prd_elm.txt. Existing large annotation trees such as human_AF_slim therefore do
+not need to rerun step 2 merely to adopt the new pair-output format.
+
+Sequence storage and legacy compatibility
+-----------------------------------------
+
+New step-1 runs store all input sequences and identifiers in one file directly
+under the genome folder:
+
+  <genome>/seqs.csv
+
+Its columns are:
+
+  HFPD_ID, UniProt_ID, Description, Sequence, Length, Source
+
+Source is CDD when HFPD_ID contains a period and Full-length otherwise. New
+genomes do not create fasta/, fasta/id_list, fasta/map_list, or one FASTA file
+per protein. Description preserves the input FASTA header text after removing
+the leading ">" and an optional HFPD_<ID>; prefix. Motif scanning reads
+Sequence directly from the table. Programs
+that require a FASTA pathname (IUPred and PfamScan) receive a temporary FASTA
+that is deleted when that individual method finishes. Gopher similarly removes
+its temporary input FASTA after use.
+
+The Python runtime remains read-compatible with legacy genomes. If seqs.csv is
+absent, it reads target IDs from fasta/id_list, UniProt mappings from
+fasta/map_list, and sequences from fasta/<HFPD_ID>. This fallback applies to
+annotation, pairing, LR calculation, final consolidation, and legacy step-3
+archive conversion. A new seqs.csv genome can therefore be paired with an old
+fasta/ genome in either orientation.
+
+CSV usage
+---------
+
+Uncompressed annotations can be loaded with pandas as follows:
+
+  df = pandas.read_csv("slim_candidates.csv", comment="#")
+
+The step-3 and step-4 gzip files are regular CSV streams, not tar archives:
+
+  df = pandas.read_csv("proteome_A_vs_proteome_B_prd_slim_candidates.csv.gz",
+                       comment="#")
+
+They can also be inspected directly on the cluster:
+
+  zcat <file>.csv.gz | head
+  zless <file>.csv.gz
+
+Running the pipeline
+--------------------
+
+Interactive launcher
+--------------------
+
+The launcher is a Python 3 program. It automatically uses the required conda
+environment at /groups/bh6_gp/software/conda_envs/v2 and stops with an error if
+that environment is unavailable.
+
+Running the launcher without a complete command starts its interactive wizard:
+
+  ./run_preppi_slim.py
+
+It asks for the primary genome first, displays all five steps, asks for a step
+number, collects that step's required settings, lists its optional settings, and
+offers to configure them. It then shows a run summary and asks for confirmation.
+
+The wizard can be requested even when some arguments were supplied:
+
+  ./run_preppi_slim.py --interactive --genome proteome_A
+
+For step 1, pressing Enter at the FASTA prompt selects input.fasta in the same
+directory as run_preppi_slim.py:
+
+  preppi_slim/tests/input.fasta
+
+Complete command-line invocations remain non-interactive and are suitable for
+scripts and reproducible HPC submissions.
+
+Step 4 prompts for the motif LR reference file and offers this default:
+
+  /groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/
+    human_AF_bn_training/test_006/motif_elm.lr
+
+Press Enter to accept it, or enter another path. For a non-interactive command,
+use --bn-file only when intentionally overriding that reference table.
+
+Command-line examples
+---------------------
+
+Annotate every new genome folder independently before comparing it:
+
+  ./run_preppi_slim.py --genome proteome_A --step 2
+  ./run_preppi_slim.py --genome proteome_B --step 2
+
+Within one proteome, the two directions are equivalent and run once:
+
+  ./run_preppi_slim.py --genome proteome_A --step 3
+
+Across two proteomes, the default is both orientations in one task and file:
+
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B --step 3
+
+This writes below every proteome_A/Seqs/<ID>/Motifs/ directory:
+
+  proteome_A_vs_proteome_B_prd_slim_candidates.csv.gz
+
+One direction can still be requested explicitly:
+
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation motif
+
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B \
+    --step 3 --orientation prd
+
+The directional filenames state which genome supplies each feature:
+
+  <motif-genome>_slim_<prd-genome>_prd_candidates.csv.gz
+
+The low-level runner also accepts motif, prd, or both:
+
+  SCR/run_PrP_ELM_batches.py proteome_A --genome2 proteome_B \
+    --orientation both
+
+Python runtime architecture
+---------------------------
+
+The shared maintenance layer follows the PrePPI-SM hfpd_python layout:
+
+  MODS/Globals.py       SLiM-only paths, tools, and resource locations
+  MODS/Genome.py        seqs.csv/legacy FASTA access, HFPD IDs, target directories
+  MODS/Method.py        common per-protein method lifecycle
+  MODS/Methods.py       registry of active SLiM methods
+  MODS/Pipeline.py      SLURM arrays, dependencies, state, and completion
+  SCR/run_pipeline.py   pipeline controller
+  SCR/run_method.py     one SLURM array task
+  SCR/process_method.py postprocessing and marker cleanup
+
+The first-party pipeline no longer invokes Perl modules or Perl controller
+scripts. PfamScan remains the bundled third-party SCR/PfamScan/pfam_scan.pl
+program and is launched by MODS/FindPRDs.py; its Perl dependency is isolated
+to that external tool.
+
+Converting an already completed legacy step 3
+----------------------------------------------
+
+Do not rerun a completed all-versus-all calculation merely to replace its tar
+archives. Convert and combine the two existing directional archives with:
+
+  python ../SCR/consolidate_pair_candidates.py \
+    --genome slim_002 --genome2 human_AF_slim
+
+The utility reads, for each anchor HFPD ID:
+
+  slim_002_slim_human_AF_slim_prd_ProtPeptide_ELM.txt.tar.gz
+  human_AF_slim_slim_slim_002_prd_ProtPeptide_ELM.txt.tar.gz
+
+and writes:
+
+  slim_002_vs_human_AF_slim_prd_slim_candidates.csv.gz
+
+The source archives are retained. Existing output files are skipped unless
+--overwrite is supplied.
+
+LR scoring
+----------
+
+Run LR scoring with the same genome, genome2, and orientation used for step 3:
+
+  ./run_preppi_slim.py --genome slim_002 --genome2 human_AF_slim \
+    --step 4 --orientation both --bn-file <Bayesian-network.csv>
+
+Because both is the default, --orientation both may be omitted. The launcher
+derives the unified input filename and writes prd_slim_LR.csv.gz per anchor
+protein. Use --pair-input or --lr-output to override either filename.
+
+The LR output identifies the motif and PRD proteins explicitly. Opposite
+motif-to-PRD directions are retained separately for both intra- and
+inter-proteome searches. Only repeated candidates in the same direction are
+collapsed to the maximum LR.
+
+After step 4 has finished for every anchor HFPD ID, consolidate the results:
+
+  ./run_preppi_slim.py --genome slim_002 --genome2 human_AF_slim --step 5
+
+The default final output is:
+
+  slim_002/Interactions/
+    slim_002_vs_human_AF_slim_PrePPI_SLiM_LR.csv.gz
+
+For an intragenome run, the default name is
+<genome>_PrePPI_SLiM_LR.csv.gz. Use --consolidated-output to override only the
+filename; the file remains under the anchor genome's Interactions directory.
+
+Raw pair CSV columns
+--------------------
+
+The unified CSV contains:
+
+  motif_genome
+  prd_genome
+  anchor_genome
+  anchor_protein
+  anchor_role
+  motif_protein
+  prd_protein
+  prd_name
+  elm_class
+  prd_start
+  prd_end
+  motif_sequence
+  motif_start
+  motif_end
+  conserved
+  disordered_fraction
+
+The genome columns make both directions unambiguous even when two genome
+folders reuse the same six-digit HFPD IDs.
+
+Missing conservation output and health checks
+----------------------------------------------
+
+conserved_slims.csv is optional during pairing. The legacy equivalent is
+motif_elm.csv. If neither exists, motif candidates are retained with
+conserved=0. The launcher reports a summary count but does not block step 3.
+
+Required motif-side inputs are disorder.fa and either slim_candidates.csv or
+legacy motif_elm.txt. The required PRD-side input is either prd_candidates.csv
+or legacy prd_elm.txt. New pair files carry prd_name from prd_candidates.csv.
+For older pair files, step 4 can recover the domain name by matching the PRD
+range in <ID>.pfam.
+
+The health check scans each proteome once for orientation=both. For a previously
+validated large proteome, it can be bypassed explicitly:
+
+  ./run_preppi_slim.py --genome proteome_A --genome2 proteome_B \
+    --step 3 --skip-health-check
+
+Resetting a step
+----------------
+
+--reset-step undoes the selected step, creates a timestamped recoverable backup,
+and exits without rerunning it. Active SLURM work causes the reset to refuse.
+
+  ./run_preppi_slim.py --genome slim_002 --genome2 human_AF_slim \
+    --step 3 --orientation both --reset-step
+
+Reset scope:
+
+  step 1  moves the entire genome/run directory to a sibling backup
+  step 2  moves annotation controllers, work areas, and old/new annotations
+  step 3  moves the selected comparison controller, work, and pair outputs
+  step 4  moves the LR controller and selected --lr-output file
+  step 5  moves the selected consolidated file from Interactions
+
+Step-2 through step-5 backups are written below:
+
+  <genome>/Reset/step_<N>_<timestamp>_<process-id>/
+
+Step 1 uses a sibling backup because the complete genome folder is reset:
+
+  <genome>.reset_step_1_<timestamp>_<process-id>
+
+Resetting a step does not automatically reset later steps. Reset dependent later
+steps separately, from the latest step backward.
+
+No-hit files
+------------
+
+A successful no-hit stage is valid and contains metadata plus a CSV header but
+no data rows. A missing required output means the stage failed or was blocked.
+
+Scientific implementation notes
+-------------------------------
+
+- The 2015 work introduced the broader genome-wide PRD/peptide interaction
+  framework. The 2026 PrePPI-SLiM model uses ELM class, motif disorder, and
+  motif conservation evidence and takes the maximum candidate LR per pair.
+- The papers describe motif disorder as the average raw IUPred residue score
+  thresholded at 0.5. The current code converts each residue to D or non-D,
+  calculates the fraction of D residues in the motif, and thresholds that
+  fraction at 0.5 in LR calculation. Check this implementation detail before
+  claiming exact reproduction of the published scoring model.
+
+Scientific references
+---------------------
+
+- Saha A, Honig B. Proteome-wide prediction of interactions between structured
+  domains and peptide motifs reveals functionally coherent subnetworks. PNAS,
+  2026.
+- Chen TS, Petrey D, Garzon JI, Honig B. Predicting Peptide-Mediated
+  Interactions on a Genome-Wide Scale. PLoS Computational Biology, 2015.

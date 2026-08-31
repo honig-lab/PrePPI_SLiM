@@ -13,6 +13,10 @@ import tarfile
 
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from MODS.Genome import target_ids
+
 
 PAIR_COLUMNS = [
     "motif_genome", "prd_genome", "anchor_genome", "anchor_protein",
@@ -246,15 +250,12 @@ def main():
     verbose = args.v or args.d
     batch = args.batch
     sys.stdout.write(f"Processing batch directory: {batch}\n")
-    map_list_file = os.path.join(batch, "fasta", "map_list")
-    if not os.path.exists(map_list_file):
-        raise SystemExit(f"map_list not found: {map_list_file}")
     try:
-        map_list = sorted(set(pd.read_csv(
-            map_list_file, header=None, sep="\t", dtype=str,
-        )[0].to_list()))
+        map_list = sorted(set(target_ids(batch)))
     except Exception as error:
-        raise SystemExit(f"Error reading {map_list_file}: {error}") from error
+        raise SystemExit(f"Error reading genome sequences from {batch}: {error}") from error
+    if not map_list:
+        raise SystemExit(f"No protein targets found in {batch}")
 
     lr_match, bnClass, bnCsv, bnDiso = readBNs(args.b, verbose=verbose)
     tasks = [

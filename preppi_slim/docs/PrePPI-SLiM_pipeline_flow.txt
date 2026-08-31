@@ -17,7 +17,10 @@ Input protein FASTA
 +-- Step 1: set up one genome/run and predict disorder (Python)
 |   |
 |   +-- assign or preserve HFPD identifiers
-|   +-- create fasta/id_list, fasta/map_list, Seqs/, and Pipeline/
+|   +-- write <genome>/seqs.csv
+|   |   `-- HFPD_ID, UniProt_ID, Description, Sequence, Length, Source
+|   +-- mark IDs containing "." as CDD; all others as Full-length
+|   +-- create Seqs/, Pipeline/, Interactions/, and tmp/
 |   `-- run IUPred independently for every protein
 |       `-- Seqs/<ID>/disorder.fa
 |
@@ -75,7 +78,7 @@ Input protein FASTA
     +-- read prd_slim_LR.csv.gz across all anchor HFPD IDs
     +-- preserve both motif-to-PRD directions when both exist
     +-- collapse only repeated copies of the same direction
-    +-- add UniProt identifiers from each genome's fasta/map_list
+    +-- add UniProt identifiers from each genome's seqs.csv
     `-- write <genome>/Interactions/
         `-- <genome>_vs_<genome2>_PrePPI_SLiM_LR.csv.gz
 
@@ -103,6 +106,34 @@ runs use true comma-separated files with short, descriptive names:
 Step 3 remains read-compatible with motif_elm.txt, motif_elm.csv, and
 prd_elm.txt. Existing large annotation trees such as human_AF_slim therefore do
 not need to rerun step 2 merely to adopt the new pair-output format.
+
+Sequence storage and legacy compatibility
+-----------------------------------------
+
+New step-1 runs store all input sequences and identifiers in one file directly
+under the genome folder:
+
+  <genome>/seqs.csv
+
+Its columns are:
+
+  HFPD_ID, UniProt_ID, Description, Sequence, Length, Source
+
+Source is CDD when HFPD_ID contains a period and Full-length otherwise. New
+genomes do not create fasta/, fasta/id_list, fasta/map_list, or one FASTA file
+per protein. Description preserves the input FASTA header text after removing
+the leading ">" and an optional HFPD_<ID>; prefix. Motif scanning reads
+Sequence directly from the table. Programs
+that require a FASTA pathname (IUPred and PfamScan) receive a temporary FASTA
+that is deleted when that individual method finishes. Gopher similarly removes
+its temporary input FASTA after use.
+
+The Python runtime remains read-compatible with legacy genomes. If seqs.csv is
+absent, it reads target IDs from fasta/id_list, UniProt mappings from
+fasta/map_list, and sequences from fasta/<HFPD_ID>. This fallback applies to
+annotation, pairing, LR calculation, final consolidation, and legacy step-3
+archive conversion. A new seqs.csv genome can therefore be paired with an old
+fasta/ genome in either orientation.
 
 CSV usage
 ---------
@@ -202,7 +233,7 @@ Python runtime architecture
 The shared maintenance layer follows the PrePPI-SM hfpd_python layout:
 
   MODS/Globals.py       SLiM-only paths, tools, and resource locations
-  MODS/Genome.py        genome folders, FASTA/HFPD IDs, and target directories
+  MODS/Genome.py        seqs.csv/legacy FASTA access, HFPD IDs, target directories
   MODS/Method.py        common per-protein method lifecycle
   MODS/Methods.py       registry of active SLiM methods
   MODS/Pipeline.py      SLURM arrays, dependencies, state, and completion

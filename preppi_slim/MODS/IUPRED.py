@@ -15,11 +15,12 @@ class IUPRED(Method):
     def run(self):
         env = os.environ.copy()
         env.setdefault("IUPred_PATH", str(IFS_HOME / "shares/iupred"))
-        result = self.execute(
-            [IUPRED_EXECUTABLE, self.seqfn, "long"],
-            capture=True,
-            env=env,
-        )
+        with self.genome.temporary_fasta(self.gid, self.wrkdir) as fasta_file:
+            result = self.execute(
+                [IUPRED_EXECUTABLE, fasta_file, "long"],
+                capture=True,
+                env=env,
+            )
         symbols = []
         for line in result.stdout.splitlines():
             if line.startswith("#") or not line.strip():

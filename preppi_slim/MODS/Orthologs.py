@@ -17,8 +17,7 @@ class Gopher(Method):
     def run(self):
         if len(self.gid) > 6:
             raise ValueError("Domains are not valid Gopher targets")
-        lines = Path(self.seqfn).read_text().splitlines()
-        header = lines[0] if lines else ""
+        header = self.desc
         match = re.search(r"RepID=(.*)", header)
         representative = match.group(1).strip() if match else next(
             (item for item in re.split(r"[ |]", header) if "_" in item), None
@@ -26,11 +25,16 @@ class Gopher(Method):
         if not representative:
             raise RuntimeError(f"No species identifier in FASTA header for {self.gid}")
         work = Path(self.wrkdir)
-        (work / "input.fa").write_text(f">sp|{self.gid}|{representative}\n" + "\n".join(lines[1:]) + "\n")
-        self.execute(
-            ["/usr/bin/python3", GOPHER_BIN, "orthfas", "gopher=input.fa", f"orthdb={GOPHER_DB}", f"blastpath={BLASTCMD}"],
-            cwd=work,
-        )
+        input_fasta = work / "input.fa"
+        input_fasta.write_text(f">sp|{self.gid}|{representative}\n{self.seq}\n")
+        try:
+            self.execute(
+                ["/usr/bin/python3", GOPHER_BIN, "orthfas", "gopher=input.fa",
+                 f"orthdb={GOPHER_DB}", f"blastpath={BLASTCMD}"],
+                cwd=work,
+            )
+        finally:
+            input_fasta.unlink(missing_ok=True)
         source = work / "ORTH" / f"{self.gid}.orth.fas"
         if not source.is_file():
             raise RuntimeError(f"Gopher did not create ortholog FASTA for {self.gid}")

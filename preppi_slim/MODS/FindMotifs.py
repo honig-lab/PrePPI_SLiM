@@ -1,7 +1,7 @@
 import csv
 from pathlib import Path
 
-from MODS.ELM import elm_definitions, fasta_sequence, motif_matches
+from MODS.ELM import elm_definitions, motif_matches
 from MODS.Method import Method
 
 
@@ -12,7 +12,7 @@ class FindMotifs_ELM(Method):
             self.output = self.motifs_elm
 
     def run(self):
-        rows = motif_matches(fasta_sequence(self.seqfn), elm_definitions())
+        rows = motif_matches(self.seq, elm_definitions())
         with open(self.output, "w", newline="", encoding="utf-8") as handle:
             handle.write("# record_type=ELM_SLIM_candidates\n")
             handle.write(f"# genome={self.gname}\tprotein={self.gid}\n")

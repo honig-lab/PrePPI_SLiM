@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import MODS.Genome as genome_module
 from MODS.ELM import elm_definitions, motif_matches
-from MODS.Genome import Genome
+from MODS.Genome import Genome, target_ids, uniprot_mapping
 from MODS.IUPRED import IUPRED, IUPRED_EXECUTABLE
 from MODS.Pipeline import Pipeline
 from MODS.ProtPeptide_ELM import ProtPeptide_ELM
@@ -61,12 +61,52 @@ class PythonRuntimeTests(unittest.TestCase):
     def test_genome_layout_and_stable_hfpd_id(self):
         genome = self.create_genome(
             "query", ">sp|P12345|TEST_HUMAN\nACDE\n"
-            ">HFPD_123456;sp|Q9TEST|SECOND_HUMAN\nFGHI\n",
+            ">HFPD_123456;sp|Q9TEST|SECOND_HUMAN\nFGHI\n"
+            ">HFPD_123457.c1;tr|A0A1234567|DOMAIN_HUMAN\nKLM\n",
         )
-        self.assertEqual(genome.get_target_list(), ["000001", "123456"])
+        self.assertEqual(
+            genome.get_target_list(), ["000001", "123456", "123457.c1"],
+        )
+        with Path(genome.home, "seqs.csv").open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(
+            tuple(rows[0]),
+            ("HFPD_ID", "UniProt_ID", "Description", "Sequence", "Length", "Source"),
+        )
+        self.assertEqual(rows[0]["UniProt_ID"], "P12345")
+        self.assertEqual(rows[0]["Length"], "4")
+        self.assertEqual(rows[0]["Source"], "Full-length")
+        self.assertEqual(rows[2]["Source"], "CDD")
+        self.assertEqual(
+            uniprot_mapping(genome.home)["123457.c1"], "A0A1234567",
+        )
+        self.assertFalse(Path(genome.home, "fasta").exists())
         self.assertTrue(Path(genome.home, "Interactions").is_dir())
         self.assertTrue(Path(genome.seqd("000001"), "Pipeline").is_symlink())
         self.assertFalse(Path(genome.seqd("000001"), "Models").exists())
+
+    def test_legacy_fasta_genome_remains_readable(self):
+        home = self.root / "legacy"
+        fasta = home / "fasta"
+        fasta.mkdir(parents=True)
+        (fasta / "id_list").write_text("000001\n000002.c1\n")
+        (fasta / "map_list").write_text(
+            "000001\t>P99999\n000002.c1\t>Q88888\n"
+        )
+        (fasta / "000001").write_text(
+            ">HFPD_000001;sp|P99999|LEGACY_HUMAN old protein\nACDE\n"
+        )
+        (fasta / "000002.c1").write_text(
+            ">HFPD_000002.c1;legacy domain\nFGH\n"
+        )
+        genome = Genome(gname="legacy")
+        self.assertEqual(target_ids(home), ["000001", "000002.c1"])
+        self.assertEqual(genome.seq("000001"), "ACDE")
+        self.assertEqual(genome.desc("000002.c1"), "HFPD_000002.c1;legacy domain")
+        self.assertEqual(
+            uniprot_mapping(home),
+            {"000001": "P99999", "000002.c1": "Q88888"},
+        )
 
     def test_elm_scanner_keeps_overlapping_hits(self):
         definitions = self.root / "elm.tsv"
@@ -92,11 +132,20 @@ class PythonRuntimeTests(unittest.TestCase):
             (),
             {"stdout": "1 A 0.75\n2 C 0.25\n3 D 0.80\n4 E 0.10\n"},
         )()
-        with patch.object(method, "execute", return_value=result) as execute:
+        observed = {}
+
+        def fake_execute(command, **_kwargs):
+            observed["fasta"] = Path(command[1]).read_text()
+            observed["path"] = Path(command[1])
+            return result
+
+        with patch.object(method, "execute", side_effect=fake_execute) as execute:
             method.run()
         command = execute.call_args.args[0]
         self.assertEqual(command[0], IUPRED_EXECUTABLE)
         self.assertNotIsInstance(command[0], type)
+        self.assertIn(">HFPD_000001;sp|P12345|TEST_HUMAN", observed["fasta"])
+        self.assertFalse(observed["path"].exists())
         self.assertEqual(
             Path(method.output).read_text().splitlines()[1],
             "D-D-",

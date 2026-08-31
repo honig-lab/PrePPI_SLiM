@@ -7,6 +7,12 @@ import csv
 import gzip
 import os
 import tarfile
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from MODS.Genome import target_ids
 
 
 LEGACY_COLUMNS = [
@@ -81,9 +87,14 @@ def main():
     args = parser.parse_args()
 
     genome_home = os.path.join(args.genome_dir, args.genome)
-    id_list = os.path.join(genome_home, "fasta", "id_list")
-    if not os.path.isfile(id_list):
-        raise SystemExit(f"id_list not found: {id_list}")
+    try:
+        targets = target_ids(genome_home)
+    except (OSError, ValueError) as error:
+        raise SystemExit(
+            f"Cannot read genome sequences from {genome_home}: {error}"
+        ) from error
+    if not targets:
+        raise SystemExit(f"No protein targets found in {genome_home}")
 
     forward_name = safe_name(
         f"{args.genome}_slim_{args.genome2}_prd_ProtPeptide_ELM.txt.tar.gz")
@@ -93,40 +104,37 @@ def main():
         f"{args.genome}_vs_{args.genome2}_prd_slim_candidates.csv.gz")
 
     converted = skipped = missing = 0
-    with open(id_list) as targets:
-        for target in (line.strip() for line in targets):
-            if not target:
-                continue
-            motif_dir = os.path.join(genome_home, "Seqs", target, "Motifs")
-            output_path = os.path.join(motif_dir, output_name)
-            if os.path.exists(output_path) and not args.overwrite:
-                skipped += 1
-                continue
-            forward_path = os.path.join(motif_dir, forward_name)
-            reverse_path = os.path.join(motif_dir, reverse_name)
-            if not os.path.exists(forward_path) and not os.path.exists(reverse_path):
-                missing += 1
-                continue
+    for target in targets:
+        motif_dir = os.path.join(genome_home, "Seqs", target, "Motifs")
+        output_path = os.path.join(motif_dir, output_name)
+        if os.path.exists(output_path) and not args.overwrite:
+            skipped += 1
+            continue
+        forward_path = os.path.join(motif_dir, forward_name)
+        reverse_path = os.path.join(motif_dir, reverse_name)
+        if not os.path.exists(forward_path) and not os.path.exists(reverse_path):
+            missing += 1
+            continue
 
-            rows = []
-            if os.path.exists(forward_path):
-                rows.extend(read_legacy_archive(
-                    forward_path, args.genome, args.genome2,
-                    args.genome, target, "motif"))
-            if os.path.exists(reverse_path):
-                rows.extend(read_legacy_archive(
-                    reverse_path, args.genome2, args.genome,
-                    args.genome, target, "prd"))
+        rows = []
+        if os.path.exists(forward_path):
+            rows.extend(read_legacy_archive(
+                forward_path, args.genome, args.genome2,
+                args.genome, target, "motif"))
+        if os.path.exists(reverse_path):
+            rows.extend(read_legacy_archive(
+                reverse_path, args.genome2, args.genome,
+                args.genome, target, "prd"))
 
-            with gzip.open(output_path, "wt", newline="") as output:
-                output.write("# record_type=PrePPI-SLiM_PRD-SLiM_candidates\n")
-                output.write(
-                    f"# anchor_genome={args.genome}\tpartner_genome={args.genome2}"
-                    "\torientation=both\n")
-                writer = csv.writer(output, lineterminator="\n")
-                writer.writerow(OUTPUT_COLUMNS)
-                writer.writerows(sorted(rows))
-            converted += 1
+        with gzip.open(output_path, "wt", newline="") as output:
+            output.write("# record_type=PrePPI-SLiM_PRD-SLiM_candidates\n")
+            output.write(
+                f"# anchor_genome={args.genome}\tpartner_genome={args.genome2}"
+                "\torientation=both\n")
+            writer = csv.writer(output, lineterminator="\n")
+            writer.writerow(OUTPUT_COLUMNS)
+            writer.writerows(sorted(rows))
+        converted += 1
 
     print(f"Output filename: {output_name}")
     print(f"Converted: {converted}; already present: {skipped}; no source archives: {missing}")

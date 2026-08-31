@@ -20,7 +20,12 @@ class FindPRDs_ELM(Method):
         env["PATH"] = env.get("PATH", "") + os.pathsep + str(JACKHAMMER_DIR)
         vendor = MAIN_DIRECTORY / "SCR/PfamScan/pfam_scan.pl"
         Path(pfam_file).unlink(missing_ok=True)
-        self.execute([PFAM_PERL, "-w", vendor, "-fasta", self.seqfn, "-dir", HMMS, "-outfile", pfam_file], env=env)
+        with self.genome.temporary_fasta(self.gid, self.wrkdir) as fasta_file:
+            self.execute(
+                [PFAM_PERL, "-w", vendor, "-fasta", fasta_file,
+                 "-dir", HMMS, "-outfile", pfam_file],
+                env=env,
+            )
         if not Path(pfam_file).exists():
             raise RuntimeError(f"PfamScan did not create {pfam_file}")
         original = Path(pfam_file).read_text()

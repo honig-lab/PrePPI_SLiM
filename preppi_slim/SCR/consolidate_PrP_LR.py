@@ -22,6 +22,13 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from MODS.Genome import target_ids, uniprot_mapping
+
 
 GENOME_DIR = os.environ.get(
     "HFPD_DATA_DIR", "/groups/bh6_gp/data/shares/databases/hfpd/genomes")
@@ -108,13 +115,17 @@ def resolve_batch_dirs(base_dir, batch_flag):
 def build_map_dict(genome_names):
     mapping = {}
     for genome_name in sorted(genome_names):
-        map_path = os.path.join(GENOME_DIR, genome_name, "fasta", "map_list")
-        if not os.path.exists(map_path):
-            print(f"[{now()}] WARNING: Missing map_list in {genome_name}", flush=True)
+        genome_home = os.path.join(GENOME_DIR, genome_name)
+        try:
+            genome_mapping = uniprot_mapping(genome_home)
+        except (OSError, ValueError) as error:
+            print(
+                f"[{now()}] WARNING: Cannot read sequence metadata in "
+                f"{genome_name}: {error}", flush=True,
+            )
             continue
-        df = pd.read_csv(map_path, sep="\t", header=None, dtype=str, names=["HFPD_ID", "UniProt_ID"])
-        for hfpd_id, uniprot_id in df.dropna().itertuples(index=False):
-            mapping[(genome_name, hfpd_id)] = uniprot_id.lstrip(">")
+        for hfpd_id, uniprot_id in genome_mapping.items():
+            mapping[(genome_name, hfpd_id)] = uniprot_id
     print(f"[{now()}] Built UniProt map | Entries={len(mapping):,}", flush=True)
     return mapping
 
@@ -128,12 +139,14 @@ def iter_all_dataframes(batch_dirs, lr_filename, workers):
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as executor:
         for batch in batch_dirs:
             t0 = time.time()
-            map_list_path = os.path.join(batch, "fasta/map_list")
-            if not os.path.exists(map_list_path):
-                print(f"[{now()}] WARNING: Missing map_list in {os.path.basename(batch)}", flush=True)
+            try:
+                ids = target_ids(batch)
+            except (OSError, ValueError) as error:
+                print(
+                    f"[{now()}] WARNING: Cannot read sequence metadata in "
+                    f"{os.path.basename(batch)}: {error}", flush=True,
+                )
                 continue
-
-            ids = pd.read_csv(map_list_path, header=None, sep="\t", dtype=str)[0].unique()
             jobs = [(batch, hfpd_id, lr_filename) for hfpd_id in ids]
             results = executor.map(process_lr_file, jobs)
 

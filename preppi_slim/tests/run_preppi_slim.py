@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import glob
 import os
 from pathlib import Path
@@ -341,6 +342,18 @@ class Pipeline:
         return self.genome_dir / (genome or self.genome)
 
     def targets(self, home: Path) -> list[str]:
+        sequence_table = home / "seqs.csv"
+        try:
+            with sequence_table.open(newline="", encoding="utf-8-sig") as handle:
+                targets = [
+                    (row.get("HFPD_ID") or "").strip()
+                    for row in csv.DictReader(handle)
+                ]
+            targets = [target for target in targets if target]
+            if targets:
+                return targets
+        except OSError:
+            pass
         id_list = home / "fasta" / "id_list"
         try:
             targets = [
@@ -381,7 +394,8 @@ class Pipeline:
         targets = self.targets(home)
         if not targets:
             raise SystemExit(
-                f"Target list is missing or empty: {home / 'fasta/id_list'}"
+                f"Sequence table or legacy target list is missing or empty: "
+                f"{home / 'seqs.csv'}; {home / 'fasta/id_list'}"
             )
         missing = []
         for target in targets:
@@ -405,7 +419,8 @@ class Pipeline:
         targets = self.targets(home)
         if not targets:
             raise SystemExit(
-                f"Target list is missing or empty: {home / 'fasta/id_list'}"
+                f"Sequence table or legacy target list is missing or empty: "
+                f"{home / 'seqs.csv'}; {home / 'fasta/id_list'}"
             )
         missing: list[str] = []
         missing_conservation = 0

@@ -10,6 +10,10 @@ import sys
 
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from MODS.Genome import target_ids
+
 from PrP_LR import (
     get_prd_name,
     open_text_output,
@@ -93,13 +97,14 @@ def main():
     parser.add_argument("-d", action="store_true")
     args = parser.parse_args()
 
-    map_list_file = os.path.join(args.batch, "fasta", "map_list")
     try:
-        targets = sorted(set(pd.read_csv(
-            map_list_file, header=None, sep="\t", dtype=str,
-        )[0].to_list()))
+        targets = sorted(set(target_ids(args.batch)))
     except Exception as error:
-        raise SystemExit(f"Error reading {map_list_file}: {error}") from error
+        raise SystemExit(
+            f"Error reading genome sequences from {args.batch}: {error}"
+        ) from error
+    if not targets:
+        raise SystemExit(f"No protein targets found in {args.batch}")
 
     lr_match, bnClass, bnCsv, bnDiso = readBNs(args.b, verbose=args.v or args.d)
     tasks = [

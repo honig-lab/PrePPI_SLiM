@@ -314,13 +314,11 @@ class Pipeline:
 
         os.environ["HFPD_DIR"] = str(self.slim_dir)
         os.environ["HFPD_DATA_DIR"] = str(self.genome_dir)
-        old_perl5lib = os.environ.get("PERL5LIB")
-        os.environ["PERL5LIB"] = (
-            f"{self.slim_dir}:{old_perl5lib}"
-            if old_perl5lib else str(self.slim_dir)
+        old_pythonpath = os.environ.get("PYTHONPATH")
+        os.environ["PYTHONPATH"] = (
+            f"{self.slim_dir}:{old_pythonpath}"
+            if old_pythonpath else str(self.slim_dir)
         )
-        os.environ["PERL_PERTURB_KEYS"] = "0"
-        os.environ["PERL_HASH_SEED"] = "0"
 
     def run(self, *command: object) -> None:
         argv = [str(item) for item in command]
@@ -717,7 +715,7 @@ class Pipeline:
                     "ProtPeptide_ELM" / run_tag
                 )
         command: list[object] = [
-            self.slim_dir / "SCR" / "run_PrP_ELM_batches.pl",
+            CONDA_PYTHON, self.slim_dir / "SCR" / "run_PrP_ELM_batches.py",
             self.genome, "--genome2", self.genome2, "--orientation", role,
         ]
         if self.args.debug:
@@ -778,7 +776,7 @@ class Pipeline:
                 self.run("mv", controller, backup)
             print("[Step 1] Setting up the genome and running IUPred")
             self.run(
-                self.slim_dir / "SCR" / "setup_genome.pl",
+                CONDA_PYTHON, self.slim_dir / "SCR" / "setup_genome.py",
                 self.genome, "-f", prepared,
             )
         finally:
@@ -811,7 +809,7 @@ class Pipeline:
                     )
         print("[Step 2] Annotating motifs, PRDs, orthologs, and conservation")
         command: list[object] = [
-            self.slim_dir / "SCR" / "run_elm.pl", self.genome,
+            CONDA_PYTHON, self.slim_dir / "SCR" / "run_elm.py", self.genome,
         ]
         if self.args.debug:
             command.append("-d")

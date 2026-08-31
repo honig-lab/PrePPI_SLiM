@@ -14,14 +14,14 @@ Pipeline tree
 
 Input protein FASTA
 |
-+-- Step 1: set up one genome/run and predict disorder
++-- Step 1: set up one genome/run and predict disorder (Python)
 |   |
 |   +-- assign or preserve HFPD identifiers
 |   +-- create fasta/id_list, fasta/map_list, Seqs/, and Pipeline/
 |   `-- run IUPred independently for every protein
 |       `-- Seqs/<ID>/disorder.fa
 |
-+-- Step 2: annotate each protein independently
++-- Step 2: annotate each protein independently (Python controller/methods)
 |   |
 |   +-- FindMotifs_ELM
 |   |   +-- scan the sequence with ELM regular expressions
@@ -45,7 +45,7 @@ Input protein FASTA
 |       +-- test local conservation of each candidate SLiM
 |       `-- Seqs/<ID>/Motifs/conserved_slims.csv
 |
-+-- Step 3: enumerate compatible PRD-SLiM pairs
++-- Step 3: enumerate compatible PRD-SLiM pairs (Python)
 |   |
 |   +-- choose anchor genome1 and partner genome2
 |   +-- orientation=both by default for different proteomes
@@ -57,7 +57,7 @@ Input protein FASTA
 |       `-- Seqs/<ID>/Motifs/
 |           <genome1>_vs_<genome2>_prd_slim_candidates.csv.gz
 |
-+-- Step 4: calculate directional protein-pair likelihood ratios
++-- Step 4: calculate directional protein-pair likelihood ratios (Python)
 |   |
 |   +-- read both orientations from the one step-3 CSV.gz
 |   +-- calculate
@@ -70,7 +70,7 @@ Input protein FASTA
 |       +-- PRD genome, protein, Pfam domain name, and residue range
 |       `-- likelihood ratio
 |
-`-- Step 5: consolidate the anchor genome's directional LR files
+`-- Step 5: consolidate the anchor genome's directional LR files (Python)
     |
     +-- read prd_slim_LR.csv.gz across all anchor HFPD IDs
     +-- preserve both motif-to-PRD directions when both exist
@@ -135,7 +135,7 @@ Running the launcher without a complete command starts its interactive wizard:
 
   ./run_preppi_slim.py
 
-It asks for the primary genome first, displays all four steps, asks for a step
+It asks for the primary genome first, displays all five steps, asks for a step
 number, collects that step's required settings, lists its optional settings, and
 offers to configure them. It then shows a run summary and asks for confirmation.
 
@@ -193,8 +193,27 @@ The directional filenames state which genome supplies each feature:
 
 The low-level runner also accepts motif, prd, or both:
 
-  SCR/run_PrP_ELM_batches.pl proteome_A --genome2 proteome_B \
+  SCR/run_PrP_ELM_batches.py proteome_A --genome2 proteome_B \
     --orientation both
+
+Python runtime architecture
+---------------------------
+
+The shared maintenance layer follows the PrePPI-SM hfpd_python layout:
+
+  MODS/Globals.py       SLiM-only paths, tools, and resource locations
+  MODS/Genome.py        genome folders, FASTA/HFPD IDs, and target directories
+  MODS/Method.py        common per-protein method lifecycle
+  MODS/Methods.py       registry of active SLiM methods
+  MODS/Pipeline.py      SLURM arrays, dependencies, state, and completion
+  SCR/run_pipeline.py   pipeline controller
+  SCR/run_method.py     one SLURM array task
+  SCR/process_method.py postprocessing and marker cleanup
+
+The first-party pipeline no longer invokes Perl modules or Perl controller
+scripts. PfamScan remains the bundled third-party SCR/PfamScan/pfam_scan.pl
+program and is launched by MODS/FindPRDs.py; its Perl dependency is isolated
+to that external tool.
 
 Converting an already completed legacy step 3
 ----------------------------------------------

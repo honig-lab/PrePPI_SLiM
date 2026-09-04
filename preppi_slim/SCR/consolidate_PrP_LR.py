@@ -28,6 +28,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from MODS.Genome import target_ids, uniprot_mapping
+from MODS.PipelineState import StatusTable, output_health
 
 
 GENOME_DIR = os.environ.get(
@@ -187,8 +188,7 @@ def select_rows(df, mode, topk):
     return picked, how
 
 
-def main():
-    args = parse_args()
+def consolidate(args):
     start_time = time.time()
     print(f"[{now()}] Start | base_dir={args.base_dir} | batch={args.batch}", flush=True)
 
@@ -253,6 +253,44 @@ def main():
     dt = time.time() - start_time
     mins, secs = divmod(dt, 60)
     print(f"[{now()}] Done | Wrote {len(df_sel):,} rows in {int(mins)} min {secs:.1f} s", flush=True)
+
+
+def main():
+    args = parse_args()
+    genome_home = Path(GENOME_DIR, args.base_dir)
+    status = StatusTable(
+        genome_home / "Pipeline" / "ConsolidatePrPLR.pip" / "status.csv"
+    )
+    inspection = output_health([args.output])
+    status.initialize([{
+        "hfpd_id": args.base_dir,
+        "subtask_id": "ConsolidatePrPLR",
+        "work_directory": str(Path(args.output).parent),
+        "status": "completed" if Path(args.output).is_file() else "pending",
+        **inspection,
+        "health": "healthy" if Path(args.output).is_file() else "pending",
+    }])
+    status.start(args.base_dir, "ConsolidatePrPLR", [args.output])
+    started = time.perf_counter()
+    try:
+        consolidate(args)
+    except BaseException as error:
+        status.fail(
+            args.base_dir,
+            "ConsolidatePrPLR",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[args.output],
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise
+    status.finish(
+        args.base_dir,
+        "ConsolidatePrPLR",
+        elapsed_seconds=time.perf_counter() - started,
+        expected_outputs=[args.output],
+        message="Directional LR results consolidated and verified.",
+    )
+    status.remove_lock()
 
 if __name__ == "__main__":
     main()

@@ -6,13 +6,17 @@ import argparse
 import concurrent.futures
 import csv
 import os
+from pathlib import Path
+import shutil
 import sys
+import time
 
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from MODS.Genome import target_ids
+from MODS.PipelineState import StatusTable, output_health
 
 from PrP_LR import (
     get_prd_name,
@@ -25,17 +29,32 @@ from PrP_LR import (
 
 def process_candidate_file(args):
     (batch, hfpd_id, input_filename, bnClass, bnCsv, bnDiso, lr_match,
-     verbose, output_filename) = args
+     verbose, output_filename, status_path) = args
     input_path = os.path.join(batch, "Seqs", hfpd_id, "Motifs", input_filename)
+    output_path = os.path.join(os.path.dirname(input_path), output_filename)
+    status = StatusTable(status_path)
+    status.start(hfpd_id, "PrP_LR_all_entries", [output_path])
+    started = time.perf_counter()
     if not os.path.exists(input_path):
-        return f"Warning: candidate file for {hfpd_id} not found: {input_path}\n"
+        message = f"Candidate file for {hfpd_id} not found: {input_path}"
+        status.fail(
+            hfpd_id, "PrP_LR_all_entries",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[output_path], error=message,
+        )
+        return f"Error: {message}\n"
 
     try:
         frame = read_candidate_file(input_path, os.path.basename(batch))
     except Exception as error:
-        return f"Error processing candidate file {input_path}: {error}\n"
+        message = f"Error processing candidate file {input_path}: {error}"
+        status.fail(
+            hfpd_id, "PrP_LR_all_entries",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[output_path], error=message,
+        )
+        return message + "\n"
 
-    output_path = os.path.join(os.path.dirname(input_path), output_filename)
     try:
         with open_text_output(output_path) as output:
             output.write("# record_type=PrePPI-SLiM_likelihood_ratios_all_entries\n")
@@ -81,7 +100,18 @@ def process_candidate_file(args):
                 ])
             writer.writerows(sorted(rows, key=lambda item: -float(item[10])))
     except Exception as error:
-        return f"Error writing output file {output_path}: {error}\n"
+        message = f"Error writing output file {output_path}: {error}"
+        status.fail(
+            hfpd_id, "PrP_LR_all_entries",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[output_path], error=message,
+        )
+        return message + "\n"
+    status.finish(
+        hfpd_id, "PrP_LR_all_entries",
+        elapsed_seconds=time.perf_counter() - started,
+        expected_outputs=[output_path], message="LR output written and verified.",
+    )
     return f"Wrote output file: {output_path}\n" if verbose else ""
 
 
@@ -106,15 +136,52 @@ def main():
     if not targets:
         raise SystemExit(f"No protein targets found in {args.batch}")
 
+    pipeline_dir = Path(args.batch, "Pipeline", "PrP_LR_all_entries.pip")
+    status_path = pipeline_dir / "status.csv"
+    status = StatusTable(status_path)
+    rows = []
+    for target in targets:
+        output = Path(args.batch, "Seqs", target, "Motifs", args.o)
+        inspection = output_health([output])
+        rows.append({
+            "hfpd_id": target,
+            "subtask_id": "PrP_LR_all_entries",
+            "work_directory": str(output.parent),
+            "status": "completed" if output.is_file() else "pending",
+            **inspection,
+            "health": "healthy" if output.is_file() else "pending",
+        })
+    status.initialize(rows)
+
+    pending = [
+        target for target in targets
+        if status.get(target, "PrP_LR_all_entries").get("status")
+        not in {"completed", "skipped"}
+    ]
+
     lr_match, bnClass, bnCsv, bnDiso = readBNs(args.b, verbose=args.v or args.d)
     tasks = [
         (args.batch, target, args.input_filename, bnClass, bnCsv, bnDiso,
-         lr_match, args.v or args.d, args.o)
-        for target in targets
+         lr_match, args.v or args.d, args.o, str(status_path))
+        for target in pending
     ]
-    with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
-        for result in executor.map(process_candidate_file, tasks):
-            sys.stdout.write(result)
+    failed = 0
+    if tasks:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
+            for result in executor.map(process_candidate_file, tasks):
+                sys.stdout.write(result)
+                failed += int(result.startswith("Error"))
+    if failed:
+        raise SystemExit(f"LR calculation failed for {failed} protein(s)")
+    if not (args.v or args.d) and status.all_terminal_and_healthy():
+        for child in pipeline_dir.iterdir():
+            if child.name in {"status.csv", "status.csv.lock"}:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+        status.remove_lock()
 
 
 if __name__ == "__main__":

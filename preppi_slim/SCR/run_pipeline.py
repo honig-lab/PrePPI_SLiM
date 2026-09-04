@@ -48,6 +48,7 @@ def main():
         [line.strip() for line in targets_file.read_text().splitlines() if line.strip()]
         if targets_file.exists() else pipeline.genome.get_target_list()
     )
+    pipeline.initialize_status(targets)
     status_path = Path(pipeline.pipedir, f"{pipeline.name}.jstat")
     status = {}
     for line in status_path.read_text().splitlines():
@@ -55,6 +56,11 @@ def main():
             key, info = line.split("\t", 1)
             status[key] = info
     pending = []
+    reported_state = {
+        f"{target}:{step}": "pending"
+        for target in targets
+        for step in steps
+    }
     for target in targets:
         for step in steps:
             key = f"{target}:{step}"
@@ -73,12 +79,18 @@ def main():
             target, step = key.split(":", 1)
             pipeline.status(target, step, status)
             info = status[key]
+            semantic_state, _ = pipeline.controller_state(info)
+            if semantic_state != reported_state.get(key):
+                pipeline.record_status(target, step, info)
+                reported_state[key] = semantic_state
             if re.search(r"complete|skip|fail", info):
                 pending.remove(key)
                 continue
             match = re.search(r"ready (\d+) jobs", info)
             if match and "queued" not in info:
                 status[key] += f"({pipeline.time()} queued)"
+                pipeline.record_status(target, step, status[key])
+                reported_state[key] = "queued"
                 with open(Path(pipeline.pipedir, f"{step}.tgt"), "a") as handle:
                     handle.write(f"{target}\t{match.group(1)}\n")
 
@@ -127,6 +139,7 @@ def main():
                 pipeline.stage(f"Pipeline failed: {len(failed)} job(s) failed.")
                 raise SystemExit(1)
             pipeline.stage("Pipeline complete.")
+            pipeline.cleanup_transient_state()
             return
         pipeline.stage("Checking cpu/space usage and submitting jobs.")
         if time.time() - started > 10000:

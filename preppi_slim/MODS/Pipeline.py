@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import random
 import re
+import shutil
 import string
 import subprocess
 import sys
 import time as time_module
+from datetime import datetime
 from pathlib import Path
 
 from MODS.Genome import Genome
 from MODS.Globals import CONDA_ENV, HFPD_SCR, MAIN_DIRECTORY, MAX_ARRAY_VAL, PYTHON
+from MODS.PipelineState import StatusTable, output_health
 
 STEP_MODULES = {
     "IUPRED": "IUPRED", "FindMotifs_ELM": "FindMotifs",
@@ -41,6 +45,167 @@ class Pipeline:
         self.stepsfn = str(Path(self.pipedir, f"{self.name}.steps"))
         self.debug = getattr(self, "debug", "no")
         self.qflag = "yes"
+        self.status_table = StatusTable(Path(self.pipedir, "status.csv"))
+
+    @staticmethod
+    def method_outputs(method):
+        output = getattr(method, "output", None)
+        if output is None:
+            return []
+        if isinstance(output, (str, Path)):
+            return [str(output)]
+        return [str(path) for path in output if path]
+
+    def initialize_status(self, targets=None):
+        """Create one durable row per target and configured subtask."""
+        rows = []
+        targets = targets or self.genome.get_target_list()
+        for gid in targets:
+            for sname in self.steps():
+                method = self.get_step_class(sname)(
+                    gname=self.gname,
+                    gid=gid,
+                    init="no",
+                    step_parameters=self.step_arg(sname),
+                )
+                outputs = self.method_outputs(method)
+                inspection = output_health(outputs)
+                completed = method.complete()
+                rows.append({
+                    "hfpd_id": gid,
+                    "subtask_id": sname,
+                    "work_directory": method.wrkdir,
+                    "status": "completed" if completed else "pending",
+                    **inspection,
+                    "health": "healthy" if completed else "pending",
+                })
+        self.status_table.initialize(rows)
+
+    @staticmethod
+    def controller_state(info):
+        if "complete 0 jobs" in info:
+            return "skipped", "not_applicable"
+        if "fail" in info or "predecessor" in info:
+            return "failed", "failed"
+        if "complete" in info:
+            return "completed", "healthy"
+        if "submit" in info:
+            return "submitted", "active"
+        if "queued" in info:
+            return "queued", "active"
+        if "ready" in info:
+            return "ready", "ready"
+        if "holding" in info:
+            return "blocked", "waiting"
+        return "pending", "pending"
+
+    def record_status(self, gid, sname, info):
+        """Mirror legacy controller history into status.csv."""
+        method = self.get_step_class(sname)(
+            gname=self.gname,
+            gid=gid,
+            init="no",
+            step_parameters=self.step_arg(sname),
+        )
+        outputs = self.method_outputs(method)
+        state, health = self.controller_state(info)
+        current = self.status_table.get(gid, sname)
+        rank = {
+            "pending": 0,
+            "blocked": 1,
+            "ready": 2,
+            "queued": 3,
+            "submitted": 4,
+            "running": 5,
+            "awaiting_postprocess": 6,
+            "completed": 7,
+            "skipped": 7,
+            "failed": 7,
+        }
+        if rank.get(current.get("status"), -1) > rank.get(state, -1):
+            return
+        values = {
+            "status": state,
+            "health": health,
+            "message": info,
+            "expected_outputs": json.dumps(outputs, separators=(",", ":")),
+        }
+        if state == "queued":
+            values["queued_at"] = datetime.now().isoformat(timespec="seconds")
+        if state in {"completed", "failed"}:
+            values["finished_at"] = datetime.now().isoformat(timespec="seconds")
+            inspection = output_health(outputs)
+            values.update({
+                key: value for key, value in inspection.items()
+                if key != "health"
+            })
+            if state == "completed" and inspection["health"] != "healthy":
+                values["status"] = "failed"
+                values["health"] = inspection["health"]
+                values["message"] = (
+                    f"{info}; controller reported completion but expected "
+                    "output is missing"
+                )
+            else:
+                values["health"] = (
+                    inspection["health"] if state == "completed" else "failed"
+                )
+        elif state == "skipped":
+            values.update({
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+                "expected_outputs": "[]",
+                "outputs_complete": "not_applicable",
+                "outputs_present": "[]",
+                "missing_outputs": "[]",
+                "output_count": 0,
+            })
+        self.status_table.update(gid, sname, **values)
+
+    def cleanup_transient_state(self):
+        """Retain only status.csv after a healthy non-debug controller run."""
+        if self.debug == "yes":
+            return False
+        if not self.status_table.all_terminal_and_healthy():
+            print(
+                f"Retaining {self.pipedir} scheduler artifacts because "
+                "status.csv contains incomplete or failed rows.",
+                file=sys.stderr,
+            )
+            return False
+        rows = self.status_table.rows()
+        method_classes = {
+            sname: self.step_arg(sname).get("class", sname)
+            for sname in self.steps()
+        }
+        for child in list(Path(self.pipedir).iterdir()):
+            if child.name == "status.csv":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+        self.status_table.remove_lock()
+
+        for row in rows:
+            gid = row.get("hfpd_id", "")
+            sname = row.get("subtask_id", "")
+            if not gid or not sname:
+                continue
+            legacy_parent = Path(
+                self.genome.home, "Pipeline", f"Pipeline_{gid}",
+            )
+            for method_name in {sname, method_classes.get(sname, sname)}:
+                legacy_method = legacy_parent / method_name
+                if legacy_method.is_dir():
+                    shutil.rmtree(legacy_method)
+            try:
+                legacy_parent.rmdir()
+            except OSError:
+                pass
+            old_link = Path(self.genome.home, "Seqs", gid, "Pipeline")
+            if old_link.is_symlink():
+                old_link.unlink()
+        return True
 
     def add_step(self, sname, argstr=None, class_=None, **parameters):
         args = {}
@@ -82,11 +247,13 @@ class Pipeline:
     def qsub(self, execute="yes"):
         script = Path(self.pipedir, f"{self.name}.sh")
         debug = " --debug" if self.debug == "yes" else ""
+        stdout = f"{self.name}.{self.gname}.o%j" if self.debug == "yes" else "/dev/null"
+        stderr = f"{self.name}.{self.gname}.e%j" if self.debug == "yes" else "/dev/null"
         script.write_text(
             "#!/bin/bash\n"
             f"#SBATCH --chdir={self.pipedir}\n#SBATCH --job-name={self.name}.{self.gname}\n"
-            f"#SBATCH --time=24:00:00\n#SBATCH --output={self.name}.{self.gname}.o%j\n"
-            f"#SBATCH --error={self.name}.{self.gname}.e%j\nset -euo pipefail\n"
+            f"#SBATCH --time=24:00:00\n#SBATCH --output={stdout}\n"
+            f"#SBATCH --error={stderr}\nset -euo pipefail\n"
             f"export HFPD_DIR={MAIN_DIRECTORY}\n"
             f"export HFPD_DATA_DIR={os.environ.get('HFPD_DATA_DIR', Path(self.genome.home).parent)}\n"
             f"export PYTHONPATH={MAIN_DIRECTORY}:${{PYTHONPATH:-}}\n"
@@ -157,7 +324,7 @@ class Pipeline:
             count = min(MAX_ARRAY_VAL, total - offset)
             script = Path(self.pipedir, f"{block_name}.batch{batch + 1}.sh")
             stdout = f"{block_name}.o%j" if self.debug == "yes" else "/dev/null"
-            stderr = f"{block_name}.e%j"
+            stderr = f"{block_name}.e%j" if self.debug == "yes" else "/dev/null"
             debug = " debug" if self.debug == "yes" else ""
             script.write_text(
                 "#!/bin/bash\n"
@@ -180,7 +347,7 @@ class Pipeline:
             job_ids.append(match.group(1))
         waiter = Path(self.pipedir, f"w{block_name}.sh")
         stdout = f"w{block_name}.o%j" if self.debug == "yes" else "/dev/null"
-        stderr = f"w{block_name}.e%j"
+        stderr = f"w{block_name}.e%j" if self.debug == "yes" else "/dev/null"
         debug = " debug" if self.debug == "yes" else ""
         waiter.write_text(
             "#!/bin/bash\n"
@@ -204,8 +371,14 @@ class Pipeline:
         info = re.sub(r"last checked:? [^)]+\)", f"last checked: {now})", info)
         if "last checked" not in info:
             info += f"(last checked: {now})"
-        method = self.get_step_class(sname)(gname=self.gname, gid=gid, step_parameters=self.step_arg(sname))
-        if method.complete():
+        method = self.get_step_class(sname)(
+            gname=self.gname,
+            gid=gid,
+            init="no",
+            step_parameters=self.step_arg(sname),
+        )
+        durable_status = self.status_table.get(gid, sname).get("status")
+        if method.complete() and durable_status == "completed":
             if "complete" not in info:
                 info += f"({now} complete)"
             jobstat[key] = info
@@ -231,8 +404,6 @@ class Pipeline:
         if count and Path(method.wrkdir, "done").exists() and Path(method.wrkdir, "process").exists():
             info += f"({now} fail output not found)"
         elif count == 0:
-            method.process()
-            Path(method.wrkdir, "done").touch()
             info += f"({now} complete 0 jobs)"
         elif "ready" not in info:
             info += f"({now} ready {count} jobs)"

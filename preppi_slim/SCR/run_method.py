@@ -48,15 +48,34 @@ def main():
     if active.is_dir():
         run_marker.touch()
     os.chdir(method.wrkdir)
-    started = time.time()
-    method.run()
-    elapsed = int(time.time() - started)
+    outputs = pipeline.method_outputs(method)
+    pipeline.status_table.start(target, args.step, outputs)
+    started = time.perf_counter()
+    try:
+        method.run()
+    except BaseException as error:
+        pipeline.status_table.fail(
+            target,
+            args.step,
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=outputs,
+            error=f"{type(error).__name__}: {error}",
+        )
+        raise
+    elapsed = time.perf_counter() - started
     Path(method.wrkdir, "done").write_text(pipeline.time() + "\n")
     if active.is_dir():
         (active / f"FREE.{target}.{method_task}").touch()
         (active / f"TM.{target}.{method_task}").write_text(
             f"{target}\t{method_task}\t{elapsed}\t{method.count_tasks()}\n"
         )
+    pipeline.status_table.ready_for_postprocess(
+        target,
+        args.step,
+        elapsed_seconds=elapsed,
+        expected_outputs=outputs,
+        message="Worker finished; output is awaiting verification and cleanup.",
+    )
 
 
 if __name__ == "__main__":

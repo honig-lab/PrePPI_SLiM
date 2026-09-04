@@ -5,7 +5,7 @@ run_PrP_LR.py
 
 This script scans a fixed genome directory for batch directories matching a given
 genome basename, writes an sbatch script for each batch into the batch's
-Pipeline/PrP_LR folder, and submits one job per batch.
+Pipeline/PrP_LR.pip folder, and submits one job per batch.
 
 Current LR Path:
     /groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/human_AF_bn_training
@@ -67,8 +67,8 @@ def main():
         print(f"Found {len(batch_dirs)} batch directories matching {genome}")
     
     for batch in batch_dirs:
-        # Create the Pipeline/PrP_LR directory if it doesn't exist.
-        pipeline_dir = os.path.join(batch, "Pipeline", "PrP_LR")
+        # Create the pipeline state directory if it does not exist.
+        pipeline_dir = os.path.join(batch, "Pipeline", "PrP_LR.pip")
         os.makedirs(pipeline_dir, exist_ok=True)
         
         # Define the sbatch script file path.
@@ -77,10 +77,12 @@ def main():
         
         # Build the sbatch script content.
         # Update the path to PrP_LR.py as appropriate.
+        log_out = os.path.join(pipeline_dir, "PrP_LR.o%j") if verbose else "/dev/null"
+        log_err = os.path.join(pipeline_dir, "PrP_LR.e%j") if verbose else "/dev/null"
         sbatch_content = f"""#!/bin/bash
 #SBATCH --job-name=PrP_LR_{batch_basename}
-#SBATCH -o {pipeline_dir}/PrP_LR.o%j
-#SBATCH -e {pipeline_dir}/PrP_LR.e%j
+#SBATCH -o {log_out}
+#SBATCH -e {log_err}
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
 #SBATCH --mem-per-cpu=4G
@@ -91,6 +93,8 @@ def main():
 export CONDA_PREFIX={shlex.quote(CONDA_ENV)}
 export CONDA_DEFAULT_ENV={shlex.quote(CONDA_ENV)}
 export PATH={shlex.quote(os.path.join(CONDA_ENV, "bin"))}:$PATH
+export HFPD_DIR={shlex.quote(preppi_dir)}
+export PYTHONPATH={shlex.quote(preppi_dir)}:${{PYTHONPATH:-}}
 
 # Run the processing module for this batch.
 {shlex.quote(CONDA_PYTHON)} {shlex.quote(module_file)} -batch {shlex.quote(batch)} \
@@ -110,9 +114,14 @@ export PATH={shlex.quote(os.path.join(CONDA_ENV, "bin"))}:$PATH
             if result.returncode == 0:
                 print(f"Submitted job for batch {batch_basename}: {result.stdout.strip()}")
             else:
-                print(f"Error submitting job for batch {batch_basename}: {result.stderr.strip()}")
+                raise RuntimeError(
+                    f"Error submitting job for batch {batch_basename}: "
+                    f"{result.stderr.strip()}"
+                )
         except Exception as e:
-            print(f"Exception while submitting job for batch {batch_basename}: {e}")
+            raise SystemExit(
+                f"Exception while submitting job for batch {batch_basename}: {e}"
+            ) from e
 
 if __name__ == "__main__":
     main()

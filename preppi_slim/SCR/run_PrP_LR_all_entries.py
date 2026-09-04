@@ -5,7 +5,7 @@ run_PrP_LR_all_entries.py
 
 This script scans a fixed genome directory for batch directories matching a given
 genome basename, writes an sbatch script for each batch into the batch's
-Pipeline/PrP_LR folder, and submits one job per batch.
+Pipeline/PrP_LR_all_entries.pip folder, and submits one job per batch.
 
 Current LR Path:
     /groups/bh6_gp/as7656/research/training_PrePPI/protein_peptide/human_AF_bn_training
@@ -61,7 +61,9 @@ def main():
     
     for batch in batch_dirs:
         # Create the Pipeline/PrP_LR directory if it doesn't exist.
-        pipeline_dir = os.path.join(batch, "Pipeline", "PrP_LR")
+        pipeline_dir = os.path.join(
+            batch, "Pipeline", "PrP_LR_all_entries.pip",
+        )
         os.makedirs(pipeline_dir, exist_ok=True)
         
         # Define the sbatch script file path.
@@ -70,22 +72,25 @@ def main():
         
         # Build the sbatch script content.
         # Update the path to PrP_LR.py as appropriate.
+        log_out = os.path.join(pipeline_dir, "PrP_LR.o%j") if verbose else "/dev/null"
+        log_err = os.path.join(pipeline_dir, "PrP_LR.e%j") if verbose else "/dev/null"
         sbatch_content = f"""#!/bin/bash
 #SBATCH --job-name=PrP_LR_{batch_basename}
-#SBATCH -o {pipeline_dir}/PrP_LR.o%j
-#SBATCH -e {pipeline_dir}/PrP_LR.e%j
+#SBATCH -o {log_out}
+#SBATCH -e {log_err}
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
 #SBATCH --mem-per-cpu=4G
 #SBATCH --time=09:00:00
 #SBATCH --partition=cpu
 
-# Load environment
-source ~/.bashrc
-conda activate /groups/bh6_gp/software/conda_envs/v2
+# Use the required PrePPI-SLiM environment.
+export PATH=/groups/bh6_gp/software/conda_envs/v2/bin:$PATH
+export HFPD_DIR={shlex.quote(preppi_dir)}
+export PYTHONPATH={shlex.quote(preppi_dir)}:${{PYTHONPATH:-}}
 
 # Run the processing module for this batch.
-python {shlex.quote(module_file)} -batch {shlex.quote(batch)} \
+/groups/bh6_gp/software/conda_envs/v2/bin/python3 {shlex.quote(module_file)} -batch {shlex.quote(batch)} \
   -g {shlex.quote(genome)} -i {shlex.quote(input_filename)} \
   -b {shlex.quote(bn_file)} -o {shlex.quote(output_filename)} {"-v" if verbose else ""}
 """

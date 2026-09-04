@@ -64,8 +64,12 @@ class ProtPeptide_ELM(Method):
         if not Path(self.genome2.home).is_dir():
             raise FileNotFoundError(f"Partner genome does not exist: {self.genome2.home}")
         self.run_tag = re.sub(r"[^A-Za-z0-9_.-]+", "_", getattr(self, "run_tag", f"{self.orientation}_{self.partner_gname}"))
-        self.wrkdir = str(Path(self.genome.home, "Pipeline", f"Pipeline_{self.gid}", "ProtPeptide_ELM", self.run_tag))
-        Path(self.wrkdir).mkdir(mode=0o775, parents=True, exist_ok=True)
+        self.wrkdir = str(Path(
+            self.genome.home, "tmp", "pipeline_work", "ProtPeptide_ELM",
+            self.run_tag, self.gid,
+        ))
+        if self.init == "yes":
+            Path(self.wrkdir).mkdir(mode=0o775, parents=True, exist_ok=True)
         if self.orientation == "both" and self.gname != self.partner_gname:
             name = f"{self.gname}_vs_{self.partner_gname}_prd_slim_candidates.csv.gz"
         else:

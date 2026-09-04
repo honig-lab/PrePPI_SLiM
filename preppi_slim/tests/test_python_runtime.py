@@ -82,7 +82,10 @@ class PythonRuntimeTests(unittest.TestCase):
         )
         self.assertFalse(Path(genome.home, "fasta").exists())
         self.assertTrue(Path(genome.home, "Interactions").is_dir())
-        self.assertTrue(Path(genome.seqd("000001"), "Pipeline").is_symlink())
+        self.assertFalse(Path(genome.seqd("000001"), "Pipeline").exists())
+        self.assertFalse(
+            Path(genome.home, "Pipeline", "Pipeline_000001").exists()
+        )
         self.assertFalse(Path(genome.seqd("000001"), "Models").exists())
 
     def test_legacy_fasta_genome_remains_readable(self):
@@ -218,8 +221,45 @@ class PythonRuntimeTests(unittest.TestCase):
         waiter = Path(pipeline.pipedir, "wIUPRED_test1.tgt.sh").read_text()
         self.assertIn("run_method.py", batch)
         self.assertNotIn("run_method.pl", batch)
+        self.assertIn("#SBATCH --output=/dev/null", batch)
+        self.assertIn("#SBATCH --error=/dev/null", batch)
         self.assertIn("--dependency=afterany:101", waiter)
         self.assertIn("process_method.py", waiter)
+        self.assertIn("#SBATCH --output=/dev/null", waiter)
+        self.assertIn("#SBATCH --error=/dev/null", waiter)
+
+    def test_successful_controller_retains_only_status_csv(self):
+        genome = self.create_genome(
+            "state_cleanup", ">sp|P12345|TEST_HUMAN\nACDE\n",
+        )
+        Path(genome.seqd("000001"), "disorder.fa").write_text(
+            ">disorder\nD-D-\n"
+        )
+        pipeline = Pipeline(name="Setup", gname=genome.gname)
+        Path(pipeline.stepsfn).write_text("")
+        pipeline.add_step("IUPRED")
+        pipeline.initialize_status()
+        Path(pipeline.pipedir, "scheduler.log").write_text("temporary\n")
+        self.assertTrue(pipeline.status_table.all_terminal_and_healthy())
+        self.assertTrue(pipeline.cleanup_transient_state())
+        self.assertEqual(
+            [path.name for path in Path(pipeline.pipedir).iterdir()],
+            ["status.csv"],
+        )
+
+    def test_incomplete_controller_retains_diagnostic_artifacts(self):
+        genome = self.create_genome(
+            "state_failure", ">sp|P12345|TEST_HUMAN\nACDE\n",
+        )
+        pipeline = Pipeline(name="Setup", gname=genome.gname)
+        Path(pipeline.stepsfn).write_text("")
+        pipeline.add_step("IUPRED")
+        pipeline.initialize_status()
+        artifact = Path(pipeline.pipedir, "worker.e123")
+        artifact.write_text("synthetic failure\n")
+        self.assertFalse(pipeline.cleanup_transient_state())
+        self.assertTrue(artifact.exists())
+        self.assertTrue(Path(pipeline.pipedir, "status.csv").exists())
 
 
 if __name__ == "__main__":

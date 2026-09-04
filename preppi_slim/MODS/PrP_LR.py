@@ -8,14 +8,18 @@ import csv
 from functools import lru_cache
 import gzip
 import os
+from pathlib import Path
+import shutil
 import sys
 import tarfile
+import time
 
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from MODS.Genome import target_ids
+from MODS.PipelineState import StatusTable, output_health
 
 
 PAIR_COLUMNS = [
@@ -159,12 +163,22 @@ def open_text_output(path):
 
 def process_candidate_file(args):
     (batch, hfpd_id, input_filename, bnClass, bnCsv, bnDiso, lr_match,
-     verbose, output_filename) = args
+     verbose, output_filename, status_path) = args
     input_path = os.path.join(batch, "Seqs", hfpd_id, "Motifs", input_filename)
+    output_path = os.path.join(os.path.dirname(input_path), output_filename)
+    status = StatusTable(status_path)
+    status.start(hfpd_id, "PrP_LR", [output_path])
+    started = time.perf_counter()
     messages = []
 
     if not os.path.exists(input_path):
-        return f"Warning: candidate file for {hfpd_id} not found: {input_path}\n"
+        message = f"Candidate file for {hfpd_id} not found: {input_path}"
+        status.fail(
+            hfpd_id, "PrP_LR",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[output_path], error=message,
+        )
+        return f"Error: {message}\n"
     if verbose:
         messages.append(f"Processing candidate file: {input_path}\n")
 
@@ -200,9 +214,14 @@ def process_candidate_file(args):
                     row_text(row, "prd_end"),
                 )
     except Exception as error:
-        return f"Error processing candidate file {input_path}: {error}\n"
+        message = f"Error processing candidate file {input_path}: {error}"
+        status.fail(
+            hfpd_id, "PrP_LR",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[output_path], error=message,
+        )
+        return message + "\n"
 
-    output_path = os.path.join(os.path.dirname(input_path), output_filename)
     try:
         with open_text_output(output_path) as output:
             output.write("# record_type=PrePPI-SLiM_likelihood_ratios\n")
@@ -230,7 +249,18 @@ def process_candidate_file(args):
                 ])
         messages.append(f"Wrote output file: {output_path}\n")
     except Exception as error:
-        messages.append(f"Error writing output file {output_path}: {error}\n")
+        message = f"Error writing output file {output_path}: {error}"
+        status.fail(
+            hfpd_id, "PrP_LR",
+            elapsed_seconds=time.perf_counter() - started,
+            expected_outputs=[output_path], error=message,
+        )
+        return message + "\n"
+    status.finish(
+        hfpd_id, "PrP_LR",
+        elapsed_seconds=time.perf_counter() - started,
+        expected_outputs=[output_path], message="LR output written and verified.",
+    )
     return "".join(messages)
 
 
@@ -257,16 +287,57 @@ def main():
     if not map_list:
         raise SystemExit(f"No protein targets found in {batch}")
 
+    pipeline_dir = Path(batch, "Pipeline", "PrP_LR.pip")
+    status_path = pipeline_dir / "status.csv"
+    status = StatusTable(status_path)
+    rows = []
+    for hfpd_id in map_list:
+        output = Path(batch, "Seqs", hfpd_id, "Motifs", args.o)
+        inspection = output_health([output])
+        rows.append({
+            "hfpd_id": hfpd_id,
+            "subtask_id": "PrP_LR",
+            "work_directory": str(output.parent),
+            "status": "completed" if output.is_file() else "pending",
+            **inspection,
+            "health": "healthy" if output.is_file() else "pending",
+        })
+    status.initialize(rows)
+
+    pending = [
+        hfpd_id for hfpd_id in map_list
+        if status.get(hfpd_id, "PrP_LR").get("status")
+        not in {"completed", "skipped"}
+    ]
+
     lr_match, bnClass, bnCsv, bnDiso = readBNs(args.b, verbose=verbose)
     tasks = [
         (batch, hfpd_id, args.input_filename, bnClass, bnCsv, bnDiso,
-         lr_match, verbose, args.o)
-        for hfpd_id in map_list
+         lr_match, verbose, args.o, str(status_path))
+        for hfpd_id in pending
     ]
-    with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
-        for result in executor.map(process_candidate_file, tasks):
-            sys.stdout.write(result)
-    sys.stdout.write(f"Processing completed for batch: {batch}\n")
+    failed = 0
+    if tasks:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=16) as executor:
+            for result in executor.map(process_candidate_file, tasks):
+                sys.stdout.write(result)
+                failed += int(result.startswith("Error"))
+    if failed:
+        raise SystemExit(f"LR calculation failed for {failed} protein(s)")
+    if not verbose and status.all_terminal_and_healthy():
+        for child in pipeline_dir.iterdir():
+            if child.name in {"status.csv", "status.csv.lock"}:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+        status.remove_lock()
+    sys.stdout.write(
+        f"Processing completed for batch: {batch} "
+        f"({len(tasks)} target(s) calculated, "
+        f"{len(map_list) - len(tasks)} already complete)\n"
+    )
 
 
 if __name__ == "__main__":

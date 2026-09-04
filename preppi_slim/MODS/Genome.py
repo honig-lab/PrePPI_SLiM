@@ -265,15 +265,11 @@ class Genome:
 
     def mk_tgt_dir(self, target):
         seq_dir = Path(self.home, "Seqs", target)
-        work_dir = Path(self.home, "Pipeline", f"Pipeline_{target}")
         for directory in (
             seq_dir, seq_dir / "Aligns", seq_dir / "Motifs",
-            seq_dir / "Orthology", work_dir,
+            seq_dir / "Orthology",
         ):
             directory.mkdir(mode=0o775, parents=True, exist_ok=True)
-        link = seq_dir / "Pipeline"
-        if not link.exists() and not link.is_symlink():
-            link.symlink_to(work_dir)
 
     def get_target_list(self):
         targets = target_ids(self.home)

@@ -22,7 +22,8 @@ Input protein FASTA
 |   +-- mark IDs containing "." as CDD; all others as Full-length
 |   +-- create Seqs/, Pipeline/, Interactions/, and tmp/
 |   `-- run IUPred independently for every protein
-|       `-- Seqs/<ID>/disorder.fa
+|       +-- Seqs/<ID>/disorder.fa
+|       `-- Pipeline/Setup.pip/status.csv
 |
 +-- Step 2: annotate each protein independently (Python controller/methods)
 |   |
@@ -44,9 +45,10 @@ Input protein FASTA
 |   |   +-- align the query and orthologs with MUSCLE
 |   |   `-- Seqs/<ID>/Aligns/residue_conservation.csv
 |   |
-|   `-- MotifConsv
+|   +-- MotifConsv
 |       +-- test local conservation of each candidate SLiM
 |       `-- Seqs/<ID>/Motifs/conserved_slims.csv
+|   `-- Pipeline/run_elm.pip/status.csv records all five subtasks
 |
 +-- Step 3: enumerate compatible PRD-SLiM pairs (Python)
 |   |
@@ -56,9 +58,10 @@ Input protein FASTA
 |   |   `-- genome2 SLiMs  --->  genome1 PRDs
 |   +-- retain rows whose PRD and SLiM share an ELM class
 |   +-- attach motif conservation and disorder evidence
-|   `-- write one gzip-compressed CSV per anchor protein
+|   +-- write one gzip-compressed CSV per anchor protein
 |       `-- Seqs/<ID>/Motifs/
 |           <genome1>_vs_<genome2>_prd_slim_candidates.csv.gz
+|   `-- Pipeline/ProtPeptide_ELM_<orientation>_<genome2>.pip/status.csv
 |
 +-- Step 4: calculate directional protein-pair likelihood ratios (Python)
 |   |
@@ -68,10 +71,11 @@ Input protein FASTA
 |   +-- retain the maximum LR for each exact motif-to-PRD direction
 |   |   +-- A motif ---> B PRD is one prediction
 |   |   `-- B motif ---> A PRD is a separate prediction
-|   `-- write Seqs/<ID>/Motifs/prd_slim_LR.csv.gz by default
+|   +-- write Seqs/<ID>/Motifs/prd_slim_LR.csv.gz by default
 |       +-- motif genome, protein, residue range, and ELM class
 |       +-- PRD genome, protein, Pfam domain name, and residue range
 |       `-- likelihood ratio
+|   `-- Pipeline/PrP_LR.pip/status.csv
 |
 `-- Step 5: consolidate the anchor genome's directional LR files (Python)
     |
@@ -79,8 +83,9 @@ Input protein FASTA
     +-- preserve both motif-to-PRD directions when both exist
     +-- collapse only repeated copies of the same direction
     +-- add UniProt identifiers from each genome's seqs.csv
-    `-- write <genome>/Interactions/
-        `-- <genome>_vs_<genome2>_PrePPI_SLiM_LR.csv.gz
+    +-- write <genome>/Interactions/
+    |   `-- <genome>_vs_<genome2>_PrePPI_SLiM_LR.csv.gz
+    `-- Pipeline/ConsolidatePrPLR.pip/status.csv
 
 Optional downstream work, not part of the core prediction
 |
@@ -237,6 +242,7 @@ The shared maintenance layer follows the PrePPI-SM hfpd_python layout:
   MODS/Method.py        common per-protein method lifecycle
   MODS/Methods.py       registry of active SLiM methods
   MODS/Pipeline.py      SLURM arrays, dependencies, state, and completion
+  MODS/PipelineState.py lock-safe, atomic status.csv maintenance
   SCR/run_pipeline.py   pipeline controller
   SCR/run_method.py     one SLURM array task
   SCR/process_method.py postprocessing and marker cleanup
@@ -245,6 +251,40 @@ The first-party pipeline no longer invokes Perl modules or Perl controller
 scripts. PfamScan remains the bundled third-party SCR/PfamScan/pfam_scan.pl
 program and is launched by MODS/FindPRDs.py; its Perl dependency is isolated
 to that external tool.
+
+Consolidated pipeline state
+---------------------------
+
+Every step now reports one human-readable status.csv under its controller
+directory:
+
+  <genome>/Pipeline/Setup.pip/status.csv
+  <genome>/Pipeline/run_elm.pip/status.csv
+  <genome>/Pipeline/ProtPeptide_ELM_<orientation>_<genome2>.pip/status.csv
+  <genome>/Pipeline/PrP_LR.pip/status.csv
+  <genome>/Pipeline/ConsolidatePrPLR.pip/status.csv
+
+Each row identifies an HFPD target and subtask and records its state, output
+health, attempt number, timestamps, elapsed time, worker and SLURM IDs, work
+directory, expected/present/missing outputs, and a diagnostic message. The CSV
+is replaced atomically while holding a file lock, so simultaneous SLURM array
+workers cannot overwrite one another's rows. A worker is not marked completed
+until postprocessing has finished and its scientific outputs have been checked.
+A no-work target is recorded as skipped/not_applicable rather than failed.
+
+For successful non-debug runs, scheduler scripts, target lists, legacy marker
+files, transient logs, and temporary work directories are removed. The
+controller directory retains only status.csv. Failed or incomplete runs retain
+their artifacts for diagnosis, and --debug retains them even after success.
+Per-target work is placed under:
+
+  <genome>/tmp/pipeline_work/<method>/<HFPD_ID>/
+
+Step 3 adds its run tag between the method and HFPD ID. New runs no longer
+create Pipeline/Pipeline_<HFPD_ID> directories or Seqs/<HFPD_ID>/Pipeline
+symlinks. The launcher treats a healthy, terminal status.csv as authoritative;
+it falls back to legacy *.stage completion text when opening an older genome
+that has no status.csv.
 
 Converting an already completed legacy step 3
 ----------------------------------------------

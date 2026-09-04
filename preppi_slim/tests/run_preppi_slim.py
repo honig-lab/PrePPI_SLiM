@@ -333,6 +333,19 @@ class Pipeline:
 
     @staticmethod
     def complete(stage_file: Path) -> bool:
+        status_file = stage_file.parent / "status.csv"
+        try:
+            with status_file.open(newline="", encoding="utf-8-sig") as handle:
+                rows = list(csv.DictReader(handle))
+            if rows:
+                return all(
+                    row.get("status") in {"completed", "skipped"}
+                    and row.get("health") in {"healthy", "not_applicable"}
+                    and row.get("outputs_complete") in {"yes", "not_applicable"}
+                    for row in rows
+                )
+        except OSError:
+            pass
         try:
             return "Pipeline complete" in stage_file.read_text(errors="replace")
         except OSError:
@@ -497,7 +510,7 @@ class Pipeline:
             if self.controller_active(controller, f"{controller.stem}.{genome}"):
                 print(f"Active pipeline controller: {controller.stem}", file=sys.stderr)
                 return True
-        lr_controller = home / "Pipeline" / "PrP_LR"
+        lr_controller = home / "Pipeline" / "PrP_LR.pip"
         if self.controller_active(lr_controller, f"PrP_LR_{genome}"):
             print(f"Active LR controller: PrP_LR_{genome}", file=sys.stderr)
             return True
@@ -540,6 +553,10 @@ class Pipeline:
             pipeline = home / "Pipeline" / f"Pipeline_{target}"
             for method in self.annotation_methods:
                 self.backup_item(home, pipeline / method)
+                self.backup_item(
+                    home,
+                    home / "tmp" / "pipeline_work" / method / target,
+                )
             seq = home / "Seqs" / target
             for relative in (
                 "Motifs/slim_candidates.csv",
@@ -573,6 +590,11 @@ class Pipeline:
                 home / "Pipeline" / f"Pipeline_{target}" /
                 "ProtPeptide_ELM" / run_tag,
             )
+            self.backup_item(
+                home,
+                home / "tmp" / "pipeline_work" / "ProtPeptide_ELM" /
+                run_tag / target,
+            )
             motifs = home / "Seqs" / target / "Motifs"
             self.backup_item(home, motifs / archive)
             if role == "motif":
@@ -599,7 +621,7 @@ class Pipeline:
                 self.backup_item(home, motifs / legacy)
 
     def reset_step4_home(self, home: Path) -> None:
-        controller = home / "Pipeline" / "PrP_LR"
+        controller = home / "Pipeline" / "PrP_LR.pip"
         if self.controller_active(controller, f"PrP_LR_{home.name}"):
             raise SystemExit(
                 f"Cannot reset step 4 while its SLURM job is active for "
@@ -607,6 +629,7 @@ class Pipeline:
             )
         self.begin_backup(home, 4)
         self.backup_item(home, controller)
+        self.backup_item(home, home / "Pipeline" / "PrP_LR")
         for target in self.targets(home):
             self.backup_item(
                 home, home / "Seqs" / target / "Motifs" / self.args.lr_output,
@@ -684,7 +707,7 @@ class Pipeline:
                     f"No batch genome folders found for {self.genome}_batch*."
                 )
             for batch_home in homes:
-                controller = batch_home / "Pipeline" / "PrP_LR"
+                controller = batch_home / "Pipeline" / "PrP_LR.pip"
                 if self.controller_active(controller, f"PrP_LR_{batch_home.name}"):
                     raise SystemExit(
                         f"Cannot reset step 4 while its SLURM job is active for "
@@ -694,6 +717,9 @@ class Pipeline:
                 self.reset_step4_home(batch_home)
         else:
             self.begin_backup(home, 5)
+            self.backup_item(
+                home, home / "Pipeline" / "ConsolidatePrPLR.pip",
+            )
             self.backup_item(home, self.consolidated_output_path())
             if self.reset_moved:
                 print(f"Step 5 reset. Backup: {self.reset_backup_root}")
@@ -728,6 +754,10 @@ class Pipeline:
                 self.remove_markers(
                     self.genome_home() / "Pipeline" / f"Pipeline_{target}" /
                     "ProtPeptide_ELM" / run_tag
+                )
+                self.remove_markers(
+                    self.genome_home() / "tmp" / "pipeline_work" /
+                    "ProtPeptide_ELM" / run_tag / target
                 )
         command: list[object] = [
             CONDA_PYTHON, self.slim_dir / "SCR" / "run_PrP_ELM_batches.py",
@@ -822,6 +852,10 @@ class Pipeline:
                         self.genome_home() / "Pipeline" /
                         f"Pipeline_{target}" / method
                     )
+                    self.remove_markers(
+                        self.genome_home() / "tmp" / "pipeline_work" /
+                        method / target
+                    )
         print("[Step 2] Annotating motifs, PRDs, orthologs, and conservation")
         command: list[object] = [
             CONDA_PYTHON, self.slim_dir / "SCR" / "run_elm.py", self.genome,
@@ -877,6 +911,10 @@ class Pipeline:
 
     def step5(self) -> None:
         output = self.consolidated_output_path()
+        controller = self.genome_home() / "Pipeline" / "ConsolidatePrPLR.pip"
+        if output.is_file() and self.complete(controller / "ConsolidatePrPLR.stage"):
+            print(f"Step 5 is already complete: {output}")
+            return
         print("[Step 5] Consolidating directional likelihood-ratio results")
         self.run(
             CONDA_PYTHON, self.slim_dir / "SCR" / "consolidate_PrP_LR.py",

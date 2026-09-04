@@ -36,7 +36,9 @@ class Method:
         self.seqd = self.genome.seqd(self.gid)
         self.wrkdir = getattr(
             self, "wrkdir",
-            str(Path(self.genome.home, "Pipeline", f"Pipeline_{self.gid}", self.name)),
+            str(Path(
+                self.genome.home, "tmp", "pipeline_work", self.name, self.gid,
+            )),
         )
         if self.init == "yes":
             Path(self.wrkdir).mkdir(mode=0o775, parents=True, exist_ok=True)
